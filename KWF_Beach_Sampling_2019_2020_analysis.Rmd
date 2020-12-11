@@ -429,6 +429,9 @@ z <- full_join(excd_ct,group_ct)
 ### need a way to include n = 0 exceedence counts
 
 
+#### working here 12/10/20
+
+
 # enterococci
 ## single-sample threshold
   geom_hline(aes(yintercept = 130, linetype =  "Raw seafood consumption\n(130 CFU/100 mL)"), color =
