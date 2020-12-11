@@ -1,0 +1,455 @@
+---
+title: "KWF_Beach_Sampling_Analysis_2019_2020"
+output:
+  html_document: 
+    fig_width: 10
+    fig_height: 6
+    fig_caption: yes
+    code_folding: hide
+    toc: yes
+    toc_depth: 4
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+editor_options: 
+  chunk_output_type: inline
+---
+
+Document last updated `r Sys.time()` by Benjamin Meyer ([ben\@kenaiwatershed.org](mailto:ben@kenaiwatershed.org){.email})
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = F, message = F)
+
+# clear environment
+rm(list=ls())
+
+# load packages
+library(tidyverse)
+library(lubridate)
+library(readr)
+library(readxl)
+library(writexl)
+library(hms)
+library(plotly)
+library(DT)
+library(xlsx)
+library(leaflet)
+library(DT)
+library(ggpubr)
+library(plotrix)
+
+select <- dplyr::select
+
+# set plotting themes
+
+## geom_col plots theme
+col_theme <- theme(axis.title = element_text(size = 14, face = "bold"),
+                   strip.text = element_text(size = 14, face = "bold"),
+                   legend.title = element_text(size = 14, face = "bold"),
+                   legend.text = element_text(size = 14),
+                   axis.text = element_text(size = 14))
+
+## geom_points plots theme
+points_theme <- theme(axis.title = element_text(size = 14, face = "bold"),
+                   strip.text = element_text(size = 14, face = "bold"),
+                   legend.title = element_text(size = 14, face = "bold"),
+                   legend.text = element_text(size = 14),
+                   axis.text = element_text(size = 14),
+                   title = element_text(size = 18))
+```
+
+<br>
+
+This draft document contains preliminary data explorations of 2019-2020 beach bacteria sampling data from the Kenai River Watershed.
+
+<br>
+
+Notes:
+
+-   Attempted to source data from EPA water quality portal but did not find it there. Sourced data instead from AWQMS files and other files found on KWF server.
+
+-   2020 MST data is present in AWQMS files, 2019 MST data is not. Sourced 2019 MST data from "MST results 2019.xlsx"
+
+-   In the future, request that can provide sample results in .csv or .xlsx format in addition to the PDFs to eliminate potential for data entry error.
+
+<br>
+
+------------------------------------------------------------------------
+
+### Read in data
+
+```{r}
+
+# import known data from local server source
+
+# specify column import names
+vars <- as.character(c("Monitoring Location Name",
+            "Activity Latitude",
+            "Activity Longitude",
+            "Activity Medium",
+            "Activity Start Date",
+            "Activity Start Time",
+            "Characteristic Name",
+            "Result Analytical Method",
+            "Result Value",
+            "Result Value Units",
+            "Result Qualifier"))
+
+# specify new column names
+new_vars <- as.character(c("location",
+            "lat",
+            "long",
+            "medium",
+            "date",
+            "time",
+            "data_type",
+            "analytical_method",
+            "val",
+            "units",
+            "qualifier"))
+
+
+# import 2019 AWQMS data
+## used this excel file because it had the most recent modified date
+## see notes in excel file; not sure if all available data is contained within here
+bs19 <- read_excel("data/KWF_2019_Kenai-BEACH_AWQMS_forQAQC_MH101119.xlsx", sheet = "AWQMS Data Template", skip = 7) %>%
+  select(all_of(vars))
+
+# import 2020 AWQMS data
+## see notes in excel file; not sure if all avilable data is contained within here
+bs20 <- read_excel("data/2020_KWF_Kenai-BEACH_AWQMS_SUBMITTED.xlsx", sheet = "RAW AWQMS Data Template", skip = 3) %>%
+  select(all_of(vars))
+
+# combine both years
+dat <- bind_rows(bs19,bs20)
+
+# rename columns
+colnames(dat) <- new_vars
+
+## 2019 MST data absent from AWQMS file.  So, import separately and format to join
+## imported sheet was created manually on 12/8/20 from the sheet titled "Summary"
+mst19 <- read_excel("data/MST results 2019.xlsx", sheet = "AWQMS_summary_format") %>%
+  select(-site_id)
+
+# join 2019 MST data to overall data set
+dat <- bind_rows(dat,mst19)
+
+# tidy column formats
+dat <- dat %>%
+  transform(time = hms::as_hms(time))
+
+# replace "Gull_Gull-#" with "Gull_Gull-4"
+# correct location names
+dat <- dat %>%
+  mutate(analytical_method = str_replace_all(analytical_method,c("Gull_Gull-5" = "Gull_Gull-4",
+                                                                 "Gull_Gull-6" = "Gull_Gull-4"))) %>%
+  mutate(location = str_replace_all(location, c("North Kenai River Beach 4" = "North Kenai Beach 4")))
+
+
+                                             
+```
+
+<br>
+
+Notes post data read-in
+
+-   Air temperature values are all negative integers (maybe a code? do not use air temperature data from this data set)
+-   Applied correction to reconcile equivalent "North Kenai Beach 4" and "North Kenai River Beach 4" sites.
+-   Some unit designations are missing (turbidity, weather condition, wind direction, others?)
+-   Identified some Microbial Source Tracking analytic method ID as "Gull_Gull-\#" (e.g. 5, 6, 7, etc) when the only designation for this method should be "Gull_Gull-4." Likely occurred from an excel drag-down at some point in data entry.
+-   Many observations in "val" column are character (e.g. "MODERATE", "ND", etc). Caution when converting to numeric.
+
+<br>
+
+Procedure:
+
+-   Recreate tables (approximately) found in provided excel file ("2020 Beach Sampling Compiled Results_FINALREPORT.xlsx") to verify values
+-   Create figures to visualize exceedence data
+
+<br>
+
+------------------------------------------------------------------------
+
+### Microbial Source Tracking
+
+#### MST Data Table
+
+```{r}
+# recreate table in tab "2019-2020_FinalReport_MST2020"
+mst_tbl <- dat %>%
+  filter(data_type == "Microbial Source Tracking") %>%
+  arrange(location,date,analytical_method) %>%
+  select(date,location,analytical_method,val) %>%
+  pivot_wider(names_from = analytical_method, values_from = val) %>%
+  arrange(date,location)
+
+colnames(mst_tbl) <- c("Date","Location","Dog Feces","Gull Feces","Human Feces")
+
+# print
+datatable(mst_tbl,
+          filter = 'top', 
+          options = list(pageLength = 5, autoWidth = TRUE))
+
+```
+
+<br>
+
+#### MST Results Figure
+
+```{r}
+# prep table
+mst_tbl <- dat %>%
+  filter(data_type == "Microbial Source Tracking") %>%
+  arrange(location,date,analytical_method) %>%
+  select(date,location,analytical_method,val) %>%
+  # replace results DNQ and ND with zero and convert to numeric
+  mutate(val = as.numeric(str_replace_all(val,c("DNQ" = "0", "ND" = "0"))))
+
+# plot
+mst_tbl %>%
+  ggplot(aes(as.factor(date),val, fill = analytical_method)) +
+  geom_col(position = "dodge") +
+  facet_grid(.~location, labeller = labeller(location = label_wrap_gen(5))) +
+  xlab("") +
+  ylab("Concentration (Copies/100 mL)") +
+  theme_bw() +
+   # modify legend
+  scale_fill_discrete(name="Source",
+                         breaks=c("Dog_BacCan-UCD", "Gull_Gull-4", "Human_HF183"),
+                         labels=c("Dog", "Gull", "Human")) +
+  # theme 
+  theme(axis.text.x = element_text(vjust = .5, angle = 85),
+        strip.text.y = element_text(angle = 0)) +
+  col_theme
+
+# save plot
+ggsave("output/mst_kenai_beach_2019_2020.png", width = 12, height = 6)
+```
+
+<br>
+
+------------------------------------------------------------------------
+
+### Enterococci and Fecal Coliform
+
+#### Bacteria Concentrations Data Table
+
+```{r}
+# prep table
+bac_tbl <- dat %>% 
+  filter(data_type %in% c("Enterococci","Fecal Coliform")) %>% 
+  arrange(location,date,data_type) %>%
+  select(date,location,data_type,val) %>%
+  # replace results DNQ and ND with zero and convert to numeric
+  mutate(val = as.numeric(str_replace_all(val,c("DNQ" = "0", "ND" = "0")))) %>%
+  # use day of year for x axis and year for facet grid
+  mutate(day = yday(date),
+         year = year(date))
+
+# print
+datatable(bac_tbl,
+          filter = 'top', 
+          options = list(pageLength = 5, autoWidth = TRUE))
+
+```
+
+<br>
+
+#### Bacteria Concentrations Figures
+
+```{r, fig.height=10, fig.width=12}
+# plot 1
+bac_tbl %>%
+  ggplot(aes(x = as.Date(paste(2014,strftime(date,format="%m-%d"),sep="-")),
+                           y = val, 
+                           color = as.factor(year))) +
+  geom_jitter(size = 3) +
+  facet_grid(location~data_type, labeller = labeller(location = label_wrap_gen(5))) +
+  xlab("") +
+  ylab("Concentration (CFU/100 mL)") +
+  scale_color_discrete(name = "Year")+
+  # theme
+  theme_bw() +
+  theme(axis.text.x = element_text(vjust = 1),
+        strip.text.y = element_text(angle = 0)) +
+  points_theme
+
+# save plot
+ggsave("output/bacteria_conc_2019_2020_v1.png", width = 10, height = 10)
+
+```
+
+```{r}
+# plot 2, enterococci
+bac_tbl %>%
+  filter(data_type == "Enterococci") %>%
+  # note; use of year for date format is "fake" placeholder
+  ggplot(aes(x = as.Date(paste(2014,strftime(date,format="%m-%d"),sep="-")),
+                           y = val, 
+                           color = as.factor(year))) +
+  geom_jitter(size = 2) +
+  facet_grid(. ~ location, scales = "free_y", labeller = labeller(location = label_wrap_gen(5))) +
+  xlab("") +
+  ylab("Concentration (CFU/100 mL)") +
+  ylim(0,625) +
+  ylim(0,625) +
+  scale_color_discrete(name = "Year") +
+
+  # single-sample threshold
+  geom_hline(aes(yintercept = 130, linetype =  "Raw seafood consumption\n(130 CFU/100 mL)"), color = "blue") +
+  scale_linetype_manual(name = "Threshold", values = c(2, 2),
+                        guide = guide_legend(override.aes = list(color = c("blue")))) +
+  # overall theme
+  theme_bw() +
+  theme(axis.text.x = element_text(vjust = 1,hjust = 1, angle = 35),
+        strip.text.y = element_text(angle = 0)) +
+  ggtitle("Enterococci Concentrations") +
+  points_theme
+
+# save plot
+ggsave("output/enterococci_conc_2019_2020.png", width = 10, height = 4)
+
+
+# plot 3, fecal coliform
+bac_tbl %>%
+  filter(data_type == "Fecal Coliform") %>%
+  # note; use of year for date format is "fake" placeholder
+  ggplot(aes(x = as.Date(paste(2014,strftime(date,format="%m-%d"),sep="-")),
+                           y = val, 
+                           color = as.factor(year))) +
+  geom_jitter(size = 2) +
+  facet_grid(. ~ location, scales = "free_y", labeller = labeller(location = label_wrap_gen(5))) +
+  xlab("") +
+  ylab("Concentration (CFU/100 mL)") +
+  scale_color_discrete(name = "Year") +
+
+  # single-sample thresholds
+  geom_hline(aes(yintercept = 31, linetype =  "Raw Seafood Consumption\n(31 CFU/100 mL)"), color = "blue") +
+  geom_hline(aes(yintercept = 400, linetype =  "Water recreation, secondary\n(400 CFU/100 mL)"), color = "red") +
+  scale_linetype_manual(name = "Threshold", values = c(2, 2),
+                        guide = guide_legend(override.aes = list(color = c("blue","red")))) +
+  # overall theme
+  theme_bw() +
+  theme(axis.text.x = element_text(vjust = 1,hjust = 1, angle = 35),
+        strip.text.y = element_text(angle = 0)) +
+  points_theme +
+  ggtitle("Fecal Coliform Concentrations")
+
+# save plot
+ggsave("output/fecal_coliform_conc_2019_2020.png", width = 10, height = 4)
+
+```
+
+<br>
+
+------------------------------------------------------------------------
+
+### Exeedence Frequency
+
+-   How frequently does the 30-day rolling geometric mean exceed threshold values?
+
+-   What percentage of samples exceed 30-day geometric mean frequencies for each site?
+
+-   Note: For geometric mean calculations, non-detect values were entered at 50% their method detection limit: See section 2.4.1 of ADEC "Listing Methodology for Determining Water Quality Impairments from Pathogens":
+
+-   "It is appropriate to consider non-detect samples when calculating the geometric mean for assessment purposes. Rather than eliminating the "non-detects" from the assessment data, these results and sample results measured below the detection limit will be calculated as 50% of the method detection limit. This approach may not be appropriate during the analysis of water quality trends."
+
+#### 30-day rolling geometric mean values for Enterococci and Fecal Coliform
+
+```{r}
+library(zoo)
+library(psych)
+
+dat_gm30 <- dat %>%
+  filter(data_type %in% c("Fecal Coliform","Enterococci")) %>%
+  mutate(year = year(date)) %>%
+  transform(val = as.numeric(val)) %>%
+  # use 50% of value if it has an "Undetected" qualifier
+  mutate(val = ifelse(is.na(qualifier),val,
+                      ifelse(qualifier == "U",(val*.5),val))) %>%
+  group_by(data_type,location,year) %>%
+  arrange(year,data_type,location,date) %>%
+  # calculate 30 day rolling geometric means
+  mutate(gm30 = rollapplyr(val, 1:n() - findInterval(date - days(30), date), 
+                           geometric.mean, fill = NA, partial = T)) %>%
+  # mutate values from the first annual 30 days of sampling to NA. (We need 30 days for a 30-day rolling geometric mean value).  However, the sampling dates do not always line up so that the first 4 weeks of observations is exactly 30 days. Here, the rolling window is set to 25 days so as not to "throw away" that data. What we really want is a geometric mean of the first four weekly observations
+  mutate(gm30 = as.numeric(ifelse(date < min(date + days(25)),"",gm30)))
+
+```
+
+<br>
+
+At each site and for each bacteria type, what percentage of 30-day rolling geometric mean values exceeded thresholds?
+
+-   Enterococci:
+
+    -   "In a 30-day period, the geometric mean of samples may not exceed 35 enterococci CFU/100 mL, and not more than 10% of the samples may exceed a statistical threshold value (STV) of 130 CFU/100 mL."
+
+-   Fecal coliform:
+
+    -   "Harvest for consumption of raw mollusks or other raw seafood: The geometric mean of samples may not exceed 14 fecal coliform/100 ml; and not more than 10% of the samples may exceed 31 CFU/100 mL for a membrane filtration test."
+
+    -   "Water recreation, secondary: In a 30-day period, the geometric mean of samples may not exceed 200 fecal coliform/100 mL, and not more than 10% of the samples may exceed 400 fecal coliform/100 mL."
+
+<br>
+
+
+```{r eval = FALSE, echo = FALSE}
+# create columns of exceedence occurences
+dat_excd <- dat_gm30 %>%
+  # individual sample exceedences
+  mutate(indv_excd = case_when(
+    (val >= 130 & data_type == "Enterococci") ~ "ec_excd_130",
+    (val >= 31 & data_type == "Fecal Coliform") ~ "fc_excd_31",
+    (val >= 400 & data_type == "Fecal Coliform") ~ "fc_excd_400")) %>%
+  # geometric mean value exceedences
+  mutate(gm30_excd = case_when(
+    (gm30 >= 35 & data_type == "Enterococci") ~ "gm_ec_excd_35",
+    (gm30 >= 14 & data_type == "Fecal Coliform") ~ "gm_fc_excd_14",
+    (gm30 >= 200 & data_type == "Fecal Coliform") ~ "gm_fc_excd_200"))
+ 
+  
+# calculate exceedence frequency by site, year, and bacteria type for individual samples and 30-day rolling geometric means
+
+## total number of SAMPLES available grouped by bacteria type, site and year
+group_ct <- dat_excd %>%
+  group_by(location,data_type,year) %>%
+  summarise(group_sample_ct = n())
+
+# total number of EXCEEDENCES available grouped by bacteria type, site, exceedence type, and year
+excd_ct <- dat_excd %>%
+  pivot_longer(cols = c("indv_excd","gm30_excd")) %>%
+  #filter(!is.na(value)) %>%
+  group_by(location,data_type,year,value) %>%
+  tally()
+
+# join total sample count to exceedence count
+z <- full_join(excd_ct,group_ct)
+
+### need a way to include n = 0 exceedence counts
+
+
+# enterococci
+## single-sample threshold
+  geom_hline(aes(yintercept = 130, linetype =  "Raw seafood consumption\n(130 CFU/100 mL)"), color =
+
+
+### FC
+# single-sample thresholds
+  geom_hline(aes(yintercept = 31, linetype =  "Raw Seafood Consumption\n(31 CFU/100 mL)"), color = "blue") +
+  geom_hline(aes(yintercept = 400, linetype =  "Water recreation, secondary\n(400 CFU/100 mL)"), color = "red") +
+
+```
+
+need to make text larger on all figures plot of 24 hr sampling event in 2019??
+
+<br>
+
+### Other Exploratory Analysis
+
+Is there a relationship between fecal coliform and enterococci concentrations?
+
+```{r}
+
+
+```
