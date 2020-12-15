@@ -66,11 +66,11 @@ This draft document contains preliminary data explorations of 2019-2020 beach ba
 
 Notes:
 
--   Attempted to source data from EPA water quality portal but did not find it there. Sourced data instead from AWQMS files and other files found on KWF server.
+-   Attempted to source beach sampling data from EPA water quality portal but did not find it there. Sourced data instead from AWQMS files and other files found on KWF server.
 
 -   2020 MST data is present in AWQMS files, 2019 MST data is not. Sourced 2019 MST data from "MST results 2019.xlsx"
 
--   In the future, request that can provide sample results in .csv or .xlsx format in addition to the PDFs to eliminate potential for data entry error.
+-   In the future, request that SGS can provide sample results in .csv or .xlsx format in addition to the PDFs to eliminate potential for data entry or data management error.
 
 <br>
 
@@ -145,7 +145,7 @@ dat <- dat %>%
                                                                  "Gull_Gull-6" = "Gull_Gull-4"))) %>%
   mutate(location = str_replace_all(location, c("North Kenai River Beach 4" = "North Kenai Beach 4")))
 
-
+rm(bs19,bs20,mst19)
                                              
 ```
 
@@ -154,10 +154,11 @@ dat <- dat %>%
 Notes post data read-in
 
 -   Air temperature values are all negative integers (maybe a code? do not use air temperature data from this data set)
--   Applied correction to reconcile equivalent "North Kenai Beach 4" and "North Kenai River Beach 4" sites.
+-   Applied name correction to reconcile equivalent "North Kenai Beach 4" and "North Kenai River Beach 4" sites.
 -   Some unit designations are missing (turbidity, weather condition, wind direction, others?)
--   Identified some Microbial Source Tracking analytic method ID as "Gull_Gull-\#" (e.g. 5, 6, 7, etc) when the only designation for this method should be "Gull_Gull-4." Likely occurred from an excel drag-down at some point in data entry.
+-   Some Microbial Source Tracking analytic method ID is entered as "Gull_Gull-\#" (e.g. 5, 6, 7, etc) when the only designation for this method should be "Gull_Gull-4." Likely occurred from an excel drag-down at some point in data entry.
 -   Many observations in "val" column are character (e.g. "MODERATE", "ND", etc). Caution when converting to numeric.
+-   Verified that "NA" observations in the value column are actually absent, checked original PDF files from SGS.
 
 <br>
 
@@ -266,7 +267,7 @@ bac_tbl %>%
   geom_jitter(size = 3) +
   facet_grid(location~data_type, labeller = labeller(location = label_wrap_gen(5))) +
   xlab("") +
-  ylab("Concentration (CFU/100 mL)") +
+  ylab("Individual Sample Concentration (CFU/100 mL)") +
   scale_color_discrete(name = "Year")+
   # theme
   theme_bw() +
@@ -290,7 +291,7 @@ bac_tbl %>%
   geom_jitter(size = 2) +
   facet_grid(. ~ location, scales = "free_y", labeller = labeller(location = label_wrap_gen(5))) +
   xlab("") +
-  ylab("Concentration (CFU/100 mL)") +
+  ylab("Individual Sample\nConcentration (CFU/100 mL)") +
   ylim(0,625) +
   ylim(0,625) +
   scale_color_discrete(name = "Year") +
@@ -320,7 +321,7 @@ bac_tbl %>%
   geom_jitter(size = 2) +
   facet_grid(. ~ location, scales = "free_y", labeller = labeller(location = label_wrap_gen(5))) +
   xlab("") +
-  ylab("Concentration (CFU/100 mL)") +
+  ylab("Individual Sample\nConcentration (CFU/100 mL)") +
   scale_color_discrete(name = "Year") +
 
   # single-sample thresholds
@@ -346,15 +347,29 @@ ggsave("output/fecal_coliform_conc_2019_2020.png", width = 10, height = 4)
 
 ### Exeedence Frequency
 
--   How frequently does the 30-day rolling geometric mean exceed threshold values?
+-   What percentage of individual sample values exceed thresholds for each site?
 
--   What percentage of samples exceed 30-day geometric mean frequencies for each site?
+-   What percentage of 30-day geometric mean values exceed thresholds for each site?
 
--   Note: For geometric mean calculations, non-detect values were entered at 50% their method detection limit: See section 2.4.1 of ADEC "Listing Methodology for Determining Water Quality Impairments from Pathogens":
+General Notes
 
--   "It is appropriate to consider non-detect samples when calculating the geometric mean for assessment purposes. Rather than eliminating the "non-detects" from the assessment data, these results and sample results measured below the detection limit will be calculated as 50% of the method detection limit. This approach may not be appropriate during the analysis of water quality trends."
+-   Note: For geometric mean calculations, non-detect values were entered at 50% their method detection limit: See section 2.4.1 of ADEC "Listing Methodology for Determining Water Quality Impairments from Pathogens": "It is appropriate to consider non-detect samples when calculating the geometric mean for assessment purposes. Rather than eliminating the "non-detects" from the assessment data, these results and sample results measured below the detection limit will be calculated as 50% of the method detection limit. This approach may not be appropriate during the analysis of water quality trends."
 
-#### 30-day rolling geometric mean values for Enterococci and Fecal Coliform
+Threshold values
+
+-   Enterococci:
+
+    -   "In a 30-day period, the geometric mean of samples may not exceed 35 enterococci CFU/100 mL, and not more than 10% of the samples may exceed a statistical threshold value (STV) of 130 CFU/100 mL."
+
+-   Fecal coliform:
+
+    -   "Harvest for consumption of raw mollusks or other raw seafood: The geometric mean of samples may not exceed 14 fecal coliform/100 ml; and not more than 10% of the samples may exceed 31 CFU/100 mL for a membrane filtration test."
+
+    -   "Water recreation, secondary: In a 30-day period, the geometric mean of samples may not exceed 200 fecal coliform/100 mL, and not more than 10% of the samples may exceed 400 fecal coliform/100 mL."
+
+<br>
+
+Calculate 30-day rolling geometric mean values for Enterococci and Fecal Coliform
 
 ```{r}
 library(zoo)
@@ -372,6 +387,7 @@ dat_gm30 <- dat %>%
   # calculate 30 day rolling geometric means
   mutate(gm30 = rollapplyr(val, 1:n() - findInterval(date - days(30), date), 
                            geometric.mean, fill = NA, partial = T)) %>%
+  
   # mutate values from the first annual 30 days of sampling to NA. (We need 30 days for a 30-day rolling geometric mean value).  However, the sampling dates do not always line up so that the first 4 weeks of observations is exactly 30 days. Here, the rolling window is set to 25 days so as not to "throw away" that data. What we really want is a geometric mean of the first four weekly observations
   mutate(gm30 = as.numeric(ifelse(date < min(date + days(25)),"",gm30)))
 
@@ -379,54 +395,316 @@ dat_gm30 <- dat %>%
 
 <br>
 
-At each site and for each bacteria type, what percentage of 30-day rolling geometric mean values exceeded thresholds?
+Designate exceedence values
 
--   Enterococci:
-
-    -   "In a 30-day period, the geometric mean of samples may not exceed 35 enterococci CFU/100 mL, and not more than 10% of the samples may exceed a statistical threshold value (STV) of 130 CFU/100 mL."
-
--   Fecal coliform:
-
-    -   "Harvest for consumption of raw mollusks or other raw seafood: The geometric mean of samples may not exceed 14 fecal coliform/100 ml; and not more than 10% of the samples may exceed 31 CFU/100 mL for a membrane filtration test."
-
-    -   "Water recreation, secondary: In a 30-day period, the geometric mean of samples may not exceed 200 fecal coliform/100 mL, and not more than 10% of the samples may exceed 400 fecal coliform/100 mL."
-
-<br>
-
-
-```{r eval = FALSE, echo = FALSE}
+```{r}
 # create columns of exceedence occurences
 dat_excd <- dat_gm30 %>%
   # individual sample exceedences
   mutate(indv_excd = case_when(
+    (val < 130 & data_type == "Enterococci") ~ "no_indv_excd",
     (val >= 130 & data_type == "Enterococci") ~ "ec_excd_130",
-    (val >= 31 & data_type == "Fecal Coliform") ~ "fc_excd_31",
+    (val < 31 & data_type == "Fecal Coliform") ~ "no_indv_excd",
+    (val >= 31 & val < 400 & data_type == "Fecal Coliform") ~ "fc_excd_31",
     (val >= 400 & data_type == "Fecal Coliform") ~ "fc_excd_400")) %>%
-  # geometric mean value exceedences
+  # 30-day rolling geometric mean value exceedences
   mutate(gm30_excd = case_when(
+    (gm30 < 35 & data_type == "Enterococci") ~ "no_gm_excd",
     (gm30 >= 35 & data_type == "Enterococci") ~ "gm_ec_excd_35",
-    (gm30 >= 14 & data_type == "Fecal Coliform") ~ "gm_fc_excd_14",
+    (gm30 < 14 & data_type == "Fecal Coliform") ~ "no_gm_excd",
+    (gm30 >= 14 & val < 200 & data_type == "Fecal Coliform") ~ "gm_fc_excd_14",
     (gm30 >= 200 & data_type == "Fecal Coliform") ~ "gm_fc_excd_200"))
- 
-  
-# calculate exceedence frequency by site, year, and bacteria type for individual samples and 30-day rolling geometric means
+```
 
-## total number of SAMPLES available grouped by bacteria type, site and year
-group_ct <- dat_excd %>%
+Calculate % exceedence frequency by site, year, and bacteria type for individual samples
+
+```{r}
+  library(janitor)
+
+# prop table for individual exceedences
+indv_excd_tbl <- dat_excd %>%
+  # remove observations with no value = NA
+  filter(!is.na(val)) %>%
+  select(location,data_type,year,indv_excd) %>%
   group_by(location,data_type,year) %>%
-  summarise(group_sample_ct = n())
+  count(indv_excd) %>%
+  spread(key = indv_excd, val = n) %>%
+  mutate_at(vars(contains("excd")),funs(as.numeric)) %>%
+  mutate(across(everything(), ~replace_na(.x, 0))) %>%
+  # sum across columns
+  # was unable to find a way to successfully use a function to sum across columns here; used manual addition...
+  mutate(sample_n = ec_excd_130 + fc_excd_31 + fc_excd_400 + no_indv_excd) %>%
+  # calculate % of sample ct exceedence
+  mutate(ec_excd_130 = ec_excd_130 / sample_n,
+         fc_excd_31 = fc_excd_31 / sample_n,
+         fc_excd_400 = fc_excd_400 / sample_n) %>%
+  select(-no_indv_excd) 
 
-# total number of EXCEEDENCES available grouped by bacteria type, site, exceedence type, and year
-excd_ct <- dat_excd %>%
-  pivot_longer(cols = c("indv_excd","gm30_excd")) %>%
-  #filter(!is.na(value)) %>%
-  group_by(location,data_type,year,value) %>%
-  tally()
+```
 
-# join total sample count to exceedence count
-z <- full_join(excd_ct,group_ct)
+<br>
 
-### need a way to include n = 0 exceedence counts
+#### Individual sample value exceedences
+
+<br>
+
+##### Table, overall frequency of individual sample exceedences
+
+```{r}
+indv_excd_tbl_exp <- indv_excd_tbl %>%
+  select(location, data_type,year,sample_n,ec_excd_130,fc_excd_31,fc_excd_400) %>%
+  transform(year = as.factor(year),
+            sample_n = as.factor(sample_n)) %>%
+  adorn_pct_formatting()
+
+# prep table for export
+colnames(indv_excd_tbl_exp) <- c("Location","Bacteria","Year","Sample Count",
+                                 "% Enterococci Samples Exceeding 130 CFU/100 mL",
+                                 "% Fecal Coliform Samples Exceeding 31 CFU/100 mL",
+                                 "% Fecal Coliform Samples Exceeding 400 CFU/100 mL")
+# save table in csv
+write_csv(indv_excd_tbl_exp,"output/individual_sample_exceedences.csv")
+
+# print table
+datatable(indv_excd_tbl_exp,
+          filter = 'top', 
+          options = list(pageLength = 5, autoWidth = TRUE))
+
+```
+
+<br>
+
+##### Table, frequency of individual sample exceedences within 30-day periods
+
+Recall; regarding individual sample values and 30-day periods:
+
+Enterococci:
+
+-   "... not more than 10% of the samples may exceed a statistical threshold value (STV) of 130 CFU/100 mL."
+
+Fecal coliform:
+
+-   "... not more than 10% of the samples may exceed 31 CFU/100 mL for a membrane filtration test."
+
+-   "... not more than 10% of the samples may exceed 400 fecal coliform/100 mL."
+
+```{r}
+# calculate % of individual samples exceeding thresholds within 30-day periods
+indv_excd_30day <- dat_excd %>%
+  # designate 30-day periods for each site/year
+  group_by(location,data_type,year) %>%
+  mutate(period_30day = rep(seq_len(n()/2), each = 4, length.out = n()),
+         sample_ct = n()) %>%
+  ungroup() %>%
+  # create columns of start/end dates for each 30-day period
+  group_by(location,data_type,year,period_30day) %>%
+  mutate(start_date = min(date),
+         end_date = max(date)) %>%
+  # count number of exceedences by type, site, year
+  group_by(location,data_type,year,sample_ct,period_30day,start_date,end_date) %>%
+  filter(!is.na(indv_excd)) %>%
+  count(indv_excd) %>%
+  # what % of individual samples exceeded thresholds during 30-day periods?
+  mutate(pct_indv_samples_excd = (n / sample_ct)) %>%
+  # remove instances of no individual sample exceedences
+  filter(indv_excd != "no_indv_excd") 
+
+# prep table for export
+indv_excd_30day_exp <- indv_excd_30day %>%
+  # retain only instances where > 10% of individual samples exceeded thresholds
+  filter(pct_indv_samples_excd > .1)  %>%
+  ungroup() %>%
+  dplyr::mutate_all(as.character) %>%
+  mutate(pct_indv_samples_excd = as.numeric(pct_indv_samples_excd)) %>%
+  # adorn with percentage format
+  adorn_pct_formatting() %>%
+  select(location,data_type,year,indv_excd,start_date,end_date,pct_indv_samples_excd) %>%
+  # replace exceedence type with longer names
+  mutate(indv_excd = str_replace_all(indv_excd,c("fc_excd_31" = "Fecal Coliform > 31",
+                                                                 "fc_excd_400" = "Fecal Coliform > 400",
+                                                                 "ec_excd_130" = "Enterococci > 130"))) %>%
+  spread(indv_excd,pct_indv_samples_excd) %>%
+  arrange(year,location,data_type)
+
+ # rename columns  
+colnames(indv_excd_30day_exp) <- c("Location","Bacteria","Year","Start Date","End Date",
+                                   "% Samples with Enterococci > 130 in 30-day period",
+                                   "% Samples with Fecal Coliform > 31 in 30-day period")
+
+# save table in csv
+write.csv(indv_excd_30day_exp,"output/30day_periods_individual_sample_exceedences.csv", row.names = F)
+
+# print table
+datatable(indv_excd_30day_exp,
+          filter = 'top', 
+          options = list(pageLength = 5, autoWidth = TRUE))
+
+```
+
+<br>
+
+##### Figure, frequency of individual sample exceedences
+
+```{r}
+indv_excd_tbl %>%
+  gather(excd, val, contains("excd")) %>%
+  ggplot(aes(as.factor(year),val,fill = excd)) +
+  geom_col(position = "dodge2") +
+  facet_grid(. ~ location, labeller = labeller(location = label_wrap_gen(5))) +
+  ylim(0,1) +
+  xlab("") +
+  ylab("% of Total Indvidual Samples\nExceeding Thresholds") + 
+  theme_bw() +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  # modify legend text
+  scale_fill_discrete(name="Exceedence Type\n(CFU/100 mL)",
+                      breaks = c("ec_excd_130","fc_excd_31","fc_excd_400"),
+                      labels = c("Enterococci > 130",
+                                 "Fecal Coliform > 31",
+                                 "Fecal Coliform > 400")) +
+  col_theme
+
+# save image
+ggsave("output/individual_sample_exceedences.png",width = 10, height = 4)
+
+```
+
+<br>
+
+##### Figure, frequency of individual sample exceedences within unique 30-day periods
+
+```{r}
+indv_excd_30day %>%
+  ggplot(aes(period_30day,pct_indv_samples_excd,fill = indv_excd)) +
+  geom_col(position = position_dodge(preserve = "single")) +
+  facet_grid(year ~ location, labeller = labeller(location = label_wrap_gen(5))) +
+  ylim(0,.3) +
+  xlab("30-Day Sampling Period") +
+  ylab("% of Indvidual Samples\nExceeding Thresholds Within 30-Day Periods") + 
+  theme_bw() +
+  geom_hline(yintercept = .1, linetype = "dashed") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  # modify legend text
+  scale_fill_discrete(name="Exceedence Type\n(CFU/100 mL)",
+                      breaks = c("ec_excd_130","fc_excd_31","fc_excd_400"),
+                      labels = c("Enterococci > 130",
+                                 "Fecal Coliform > 31",
+                                 "Fecal Coliform > 400")) +
+  col_theme
+
+# save image
+ggsave("output/30day_individual_sample_exceedences.png",width = 10, height = 4)
+
+
+```
+
+<br>
+
+***
+***
+
+<br>
+
+#### 30-day rolling mean of sample values, exceedences
+```{r}
+
+# plot, enterococci 30 day geometric means
+dat_excd %>%
+  filter(data_type == "Enterococci") %>%
+  # note; use of year for date format is "fake" placeholder
+  ggplot(aes(x = as.Date(paste(2014,strftime(date,format="%m-%d"),sep="-")),
+                           y = gm30, 
+                           color = as.factor(year))) +
+  geom_jitter(size = 2) +
+  facet_grid(. ~ location, scales = "free_y", labeller = labeller(location = label_wrap_gen(5))) +
+  xlab("") +
+  ylab("30-Day Geometric Mean Sample\nConcentration (CFU/100 mL)") +
+  ylim(0,250) +
+  scale_color_discrete(name = "Year") +
+
+  # 30 day geometric mean threshold
+  geom_hline(aes(yintercept = 35, linetype =  "Raw seafood consumption\n(35 CFU/100 mL)"), color = "blue") +
+  scale_linetype_manual(name = "Threshold", values = c(2, 2),
+                        guide = guide_legend(override.aes = list(color = c("blue")))) +
+  # overall theme
+  theme_bw() +
+  theme(axis.text.x = element_text(vjust = 1,hjust = 1, angle = 35),
+        strip.text.y = element_text(angle = 0)) +
+  ggtitle("Enterococci\n30-Day Geometric Mean Concentrations") +
+  points_theme
+
+# save plot
+ggsave("output/geomean_enterococci_conc_2019_2020.png", width = 10.5, height = 4)
+
+
+
+# plot, fecal coliform 30 day geometric means
+dat_excd %>%
+  filter(data_type == "Fecal Coliform") %>%
+  # note; use of year for date format is "fake" placeholder
+  ggplot(aes(x = as.Date(paste(2014,strftime(date,format="%m-%d"),sep="-")),
+                           y = gm30, 
+                           color = as.factor(year))) +
+  geom_jitter(size = 2) +
+  facet_grid(. ~ location, scales = "free_y", labeller = labeller(location = label_wrap_gen(5))) +
+  xlab("") +
+  ylab("30-Day Geometric Mean Sample\nConcentration (CFU/100 mL)") +
+  scale_color_discrete(name = "Year") +
+
+  # 30 day geometric mean thresholds
+  geom_hline(aes(yintercept = 14, linetype =  "Raw Seafood Consumption\n(14 CFU/100 mL)"), color = "blue") +
+  geom_hline(aes(yintercept = 200, linetype =  "Water recreation, secondary\n(200 CFU/100 mL)"), color = "red") +
+  scale_linetype_manual(name = "Threshold", values = c(2, 2),
+                        guide = guide_legend(override.aes = list(color = c("blue","red")))) +
+  # overall theme
+  theme_bw() +
+  theme(axis.text.x = element_text(vjust = 1,hjust = 1, angle = 35),
+        strip.text.y = element_text(angle = 0)) +
+  points_theme +
+  ggtitle("Fecal Coliform\n30-Day Geometric Mean of Concentrations")
+
+# save plot
+ggsave("output/geomean_fecal_coliform_conc_2019_2020.png", width = 10, height = 4)
+
+
+
+```
+
+
+
+<br>
+
+
+
+##### Table, frequency of 30-day rolling geometric mean exceedences
+
+<br>
+
+##### Figure, frequency of 30-day rolling geometric mean exceedences
+
+Calculate % exceedence frequency by site, year, and bacteria type for 30-day rolling geometric mean
+
+```{r echo = F, eval= FALSE}
+
+### code examples
+
+# plot
+mst_tbl %>%
+  ggplot(aes(as.factor(date),val, fill = analytical_method)) +
+  geom_col(position = "dodge") +
+  facet_grid(.~location, labeller = labeller(location = label_wrap_gen(5))) +
+  xlab("") +
+  ylab("Concentration (Copies/100 mL)") +
+  theme_bw() +
+   # modify legend
+  scale_fill_discrete(name="Source",
+                         breaks=c("Dog_BacCan-UCD", "Gull_Gull-4", "Human_HF183"),
+                         labels=c("Dog", "Gull", "Human")) +
+  # theme 
+  theme(axis.text.x = element_text(vjust = .5, angle = 85),
+        strip.text.y = element_text(angle = 0)) +
+  col_theme
+
 
 
 #### working here 12/10/20
