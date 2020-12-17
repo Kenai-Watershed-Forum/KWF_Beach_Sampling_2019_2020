@@ -37,6 +37,9 @@ library(leaflet)
 library(DT)
 library(ggpubr)
 library(plotrix)
+library(zoo)
+library(psych)
+library(janitor)
 
 select <- dplyr::select
 
@@ -143,7 +146,10 @@ dat <- dat %>%
 dat <- dat %>%
   mutate(analytical_method = str_replace_all(analytical_method,c("Gull_Gull-5" = "Gull_Gull-4",
                                                                  "Gull_Gull-6" = "Gull_Gull-4"))) %>%
-  mutate(location = str_replace_all(location, c("North Kenai River Beach 4" = "North Kenai Beach 4")))
+  mutate(location = str_replace_all(location, c("North Kenai River Beach 4" = "North Kenai Beach 4"))) %>%
+  # include only water quality data
+  # bacteria concs and temperature
+  filter(medium == "Water")
 
 rm(bs19,bs20,mst19)
                                              
@@ -159,6 +165,7 @@ Notes post data read-in
 -   Some Microbial Source Tracking analytic method ID is entered as "Gull_Gull-\#" (e.g. 5, 6, 7, etc) when the only designation for this method should be "Gull_Gull-4." Likely occurred from an excel drag-down at some point in data entry.
 -   Many observations in "val" column are character (e.g. "MODERATE", "ND", etc). Caution when converting to numeric.
 -   Verified that "NA" observations in the value column are actually absent, checked original PDF files from SGS.
+-   Replicate values are present
 
 <br>
 
@@ -171,14 +178,71 @@ Procedure:
 
 ------------------------------------------------------------------------
 
+<br>
+
+### Replicate sample values
+
+Address replicate sample values
+
+-   How many replicate samples do we have?
+
+```{r}
+# how many replicate samples do we have?
+rep_ct <- dat %>%
+  filter(data_type %in% c("Enterococci","Fecal Coliform","Microbial Source Tracking")) %>%
+  group_by(location,date,time,data_type) %>%
+  count(name = "rep_set") %>%
+  ungroup() %>%
+  filter(rep_set > 1) %>%
+  group_by(data_type,rep_set) %>%
+  count(name = "count")
+
+datatable(rep_ct)
+
+  
+```
+
+The 2019 - 2020 data set has a number of sample values where a paired replicate also exists, both for bacteria concentration values and microbial source tracking values. 
+
+As per ADEC CALM protocol, where two repicate values exist, only the higher of the two values are used in further analyses.
+
+<br>
+
+```{r}
+# mst sample values are in sets of 3 and have alphabetical characters for concentrations, so it treat separately
+mst_dat <- dat %>%
+  filter(data_type == "Microbial Source Tracking")
+
+
+# prep bacteria concentrations dataframe
+dat  <- dat %>%
+  filter(data_type %in% c("Enterococci","Fecal Coliform")) %>%  
+  group_by(location,lat,long,medium,data_type,analytical_method,units,qualifier,date,time) %>%
+  
+  # where pairs of two replicate samples exist, retain only the higher of the two values.  
+  ## For example: South Kenai Beach 3 Enterococci 2019-05-21, rep1 = 4, rep 2 = 5; retains only rep1 = 4
+  filter(val == max(val)) %>%
+  
+  # in some cases, when two replicate values are present, they are identical (e.g. rep1 = 1, rep2 = 1).  where equivalencies exist, we want to retain only one of the values
+  ungroup() %>%
+  group_by(location,lat,long,medium,data_type,analytical_method,units,qualifier,date,time,val) %>%
+  summarise(val = mean(as.numeric(val))) %>%
+  
+  # and, in some cases, where two identical values exist, one may have a qualifier (e.g. "U") and the other does not
+  ## We want to retain the one without the qualifier (e.g. "higher" value)
+  ## remove 'qualifier' as grouping factor but keep it as a column
+  ungroup() %>%
+  distinct(location,lat,long,medium,data_type,analytical_method,units,date,time,val, .keep_all = T)
+
+```
+
 ### Microbial Source Tracking
 
 #### MST Data Table
 
 ```{r}
 # recreate table in tab "2019-2020_FinalReport_MST2020"
-mst_tbl <- dat %>%
-  filter(data_type == "Microbial Source Tracking") %>%
+mst_tbl <- mst_dat %>%
   arrange(location,date,analytical_method) %>%
   select(date,location,analytical_method,val) %>%
   pivot_wider(names_from = analytical_method, values_from = val) %>%
@@ -198,8 +262,8 @@ datatable(mst_tbl,
 #### MST Results Figure
 
 ```{r}
-# prep table
-mst_tbl <- dat %>%
+# prep table for plot
+mst_tbl <- mst_dat %>%
   filter(data_type == "Microbial Source Tracking") %>%
   arrange(location,date,analytical_method) %>%
   select(date,location,analytical_method,val) %>%
@@ -231,7 +295,7 @@ ggsave("output/mst_kenai_beach_2019_2020.png", width = 12, height = 6)
 
 ------------------------------------------------------------------------
 
-### Enterococci and Fecal Coliform
+### Enterococci and Fecal Coliform Concentrations
 
 #### Bacteria Concentrations Data Table
 
@@ -273,7 +337,8 @@ bac_tbl %>%
   theme_bw() +
   theme(axis.text.x = element_text(vjust = 1),
         strip.text.y = element_text(angle = 0)) +
-  points_theme
+  points_theme +
+  ggtitle("Bacteria Raw Concentrations")
 
 # save plot
 ggsave("output/bacteria_conc_2019_2020_v1.png", width = 10, height = 10)
@@ -347,15 +412,7 @@ ggsave("output/fecal_coliform_conc_2019_2020.png", width = 10, height = 4)
 
 ### Exeedence Frequency
 
--   What percentage of individual sample values exceed thresholds for each site?
-
--   What percentage of 30-day geometric mean values exceed thresholds for each site?
-
-General Notes
-
--   Note: For geometric mean calculations, non-detect values were entered at 50% their method detection limit: See section 2.4.1 of ADEC "Listing Methodology for Determining Water Quality Impairments from Pathogens": "It is appropriate to consider non-detect samples when calculating the geometric mean for assessment purposes. Rather than eliminating the "non-detects" from the assessment data, these results and sample results measured below the detection limit will be calculated as 50% of the method detection limit. This approach may not be appropriate during the analysis of water quality trends."
-
-Threshold values
+Define ADEC threshold values
 
 -   Enterococci:
 
@@ -369,13 +426,16 @@ Threshold values
 
 <br>
 
-Calculate 30-day rolling geometric mean values for Enterococci and Fecal Coliform
+General Data Notes
+
+-   For geometric mean calculations, non-detect values were assigned 50% their method detection limit: See section 2.4.1 of ADEC "Listing Methodology for Determining Water Quality Impairments from Pathogens": "It is appropriate to consider non-detect samples when calculating the geometric mean for assessment purposes. Rather than eliminating the "non-detects" from the assessment data, these results and sample results measured below the detection limit will be calculated as 50% of the method detection limit. This approach may not be appropriate during the analysis of water quality trends."
+
+<br>
+
+Calculate 30-day rolling geometric mean values for Enterococci and Fecal Coliform concentrations
 
 ```{r}
-library(zoo)
-library(psych)
-
-dat_gm30 <- dat %>%
+dat  <- dat %>%
   filter(data_type %in% c("Fecal Coliform","Enterococci")) %>%
   mutate(year = year(date)) %>%
   transform(val = as.numeric(val)) %>%
@@ -388,18 +448,16 @@ dat_gm30 <- dat %>%
   mutate(gm30 = rollapplyr(val, 1:n() - findInterval(date - days(30), date), 
                            geometric.mean, fill = NA, partial = T)) %>%
   
-  # mutate values from the first annual 30 days of sampling to NA. (We need 30 days for a 30-day rolling geometric mean value).  However, the sampling dates do not always line up so that the first 4 weeks of observations is exactly 30 days. Here, the rolling window is set to 25 days so as not to "throw away" that data. What we really want is a geometric mean of the first four weekly observations
-  mutate(gm30 = as.numeric(ifelse(date < min(date + days(25)),"",gm30)))
+  # mutate values from the first annual 30 days of sampling to NA. (We need 30 days for a 30-day rolling geometric mean value).
+  mutate(gm30 = as.numeric(ifelse(date < min(date + days(30)),"",gm30)))
 
 ```
 
 <br>
 
-Designate exceedence values
-
 ```{r}
 # create columns of exceedence occurences
-dat_excd <- dat_gm30 %>%
+dat  <- dat %>%
   # individual sample exceedences
   mutate(indv_excd = case_when(
     (val < 130 & data_type == "Enterococci") ~ "no_indv_excd",
@@ -415,6 +473,99 @@ dat_excd <- dat_gm30 %>%
     (gm30 >= 14 & val < 200 & data_type == "Fecal Coliform") ~ "gm_fc_excd_14",
     (gm30 >= 200 & data_type == "Fecal Coliform") ~ "gm_fc_excd_200"))
 ```
+
+<br>
+
+Calculate percent of individual sample values in rolling 30-day period exceeding thresholds
+
+```{r}
+
+z <- dat %>%
+  filter(!is.na(val)) %>%
+  group_by(data_type,location,year) %>%
+  mutate(obs = 1) %>%
+
+  # mutate if individual exceedence present
+  mutate(indv_ec_excd_130 = ifelse(indv_excd == "ec_excd_130",1,0),
+         indv_fc_excd_31  = ifelse(indv_excd == "fc_excd_31",1,0),
+         indv_fc_excd_400 = ifelse(indv_excd == "fc_excd_400",1,0)) %>%
+  
+  # mutate if gm30 exceedence present
+  mutate(gm30_ec_excd_35 = ifelse(gm30_excd == "gm_ec_excd_35",1,0),
+         gm30_fc_excd_14  = ifelse(gm30_excd == "gm_fc_excd_14",1,0),
+         gm30_fc_excd_200 = ifelse(gm30_excd == "gm_fc_excd_200",1,0)) %>%
+  
+  
+  ungroup() %>%
+  group_by(data_type,location,year,gm30,
+           indv_ec_excd_130,indv_fc_excd_31,indv_fc_excd_400,
+           gm30_ec_excd_35, gm30_fc_excd_14, gm30_fc_excd_200) %>%
+  
+ # count samples from each date (some duplicates)
+  count(date, wt = obs, name = "obs") %>%
+  arrange(data_type,location,year,date) %>%
+  
+ # sum the number of observations available from previous 30 days
+ # these 3 lines of code took me 5 hours to figure out :/
+  ungroup() %>%
+  group_by(data_type,location,year) %>%
+  mutate(grp_sample_ct = rollapplyr(obs, 1:n() - findInterval(date - days(30), date), 
+                           sum, fill = NA, partial = T)) %>%
+  
+  # retain only instances with 30 days of prior observations
+  filter(!is.na(gm30)) %>%
+  
+  # calculate percentage of individual samples exceeding various thresholds in previous 30 days
+  
+  ## instances in which 10% of samples from past 30 days exceed thresholds
+  mutate(pct_indv_ec_excd_130 = indv_ec_excd_130 / grp_sample_ct,
+         pct_indv_fc_excd_31 = indv_fc_excd_31 / grp_sample_ct,
+         pct_indv_fc_excd_400 = indv_fc_excd_400 / grp_sample_ct) %>%
+  
+  # retain desired columns
+  select(data_type,location,year,date,contains("gm30"),contains("pct")) %>%
+  ungroup() %>%
+  arrange(data_type,location,year,date)
+
+
+# want to retain gm30 column alongside others; currently stacked
+
+## messy steps below
+
+## discovered here:  there are some repeat days w/ diff gm30 values.  need to check earlier grouping factors; like the ones used to calc gm30.  will make possible to use spread fxn correctly once resolved
+
+
+
+z1 <- z %>%
+  select(data_type,date,location,gm30) %>%
+  spread(data_type,gm30)
+  
+ec <- z %>%
+  filter(data_type == "Enterococci") %>%
+  select(location,date,gm30) %>%
+  rename(gm30_ec = gm30)
+
+fc <- z %>%
+  filter(data_type == "Fecal Coliform") %>%
+  select(location,date,gm30) %>%
+  rename(gm30_fc = gm30)
+
+z1 <- left_join(ec,fc,by = c("location","date"))
+
+
+# final table to print; export to excel file? or can r generate a color scheme down-column like excel?
+x <- left_join(z,z1)
+
+# two gm30 cells are NA but other column shows an exceedence on that day... find out why
+# final:  publish each site as an indv page, highlight cell values w/ exceedences; pair w/ horizon geom segment vs day of
+
+
+
+  
+
+```
+
+<br>
 
 Calculate % exceedence frequency by site, year, and bacteria type for individual samples
 
@@ -600,12 +751,16 @@ ggsave("output/30day_individual_sample_exceedences.png",width = 10, height = 4)
 
 <br>
 
-***
-***
+------------------------------------------------------------------------
+
+------------------------------------------------------------------------
 
 <br>
 
-#### 30-day rolling mean of sample values, exceedences
+#### 30-day rolling geometric mean of sample values, exceedences
+
+##### Figure, individual exceedences, 30-day rolling geometric mean
+
 ```{r}
 
 # plot, enterococci 30 day geometric means
@@ -670,17 +825,101 @@ ggsave("output/geomean_fecal_coliform_conc_2019_2020.png", width = 10, height = 
 
 ```
 
-
-
 <br>
-
-
 
 ##### Table, frequency of 30-day rolling geometric mean exceedences
 
+Calculate % exceedence frequency by site, year, and bacteria type for 30-day rolling geometric mean values
+
+```{r}
+
+# prop table for individual exceedences
+gm30_excd_tbl <- dat_excd %>%
+  # remove observations with no value = NA
+  filter(!is.na(val),
+         !is.na(gm30_excd)) %>%
+  select(location,data_type,year,gm30_excd) %>%
+  group_by(location,data_type,year) %>%
+  count(gm30_excd) %>%
+  spread(key = gm30_excd, val = n) %>%
+  mutate_at(vars(contains("excd")),funs(as.numeric)) %>%
+  mutate(across(everything(), ~replace_na(.x, 0))) %>%
+  # sum across columns
+  # was unable to find a way to successfully use a function to sum across columns here; used manual addition...
+  mutate(sample_n = gm_ec_excd_35 + gm_fc_excd_14 + gm_fc_excd_200 + no_gm_excd) %>%
+  # calculate % of sample ct exceedence
+  mutate(gm_ec_excd_35 = gm_ec_excd_35 / sample_n,
+         gm_fc_excd_14 = gm_fc_excd_14 / sample_n,
+         gm_fc_excd_200 = gm_fc_excd_200 / sample_n) %>%
+  select(-no_gm_excd) 
+
+# prep for display and export
+gm30_excd_tbl_exp <- gm30_excd_tbl %>%
+  select(location, data_type,year,sample_n,gm_ec_excd_35,gm_fc_excd_14,gm_fc_excd_200) %>%
+  transform(year = as.factor(year),
+            sample_n = as.factor(sample_n)) %>%
+  adorn_pct_formatting()
+
+# prep table for export
+colnames(gm30_excd_tbl_exp) <- c("Location","Bacteria","Year","Sample Count",
+                                 "% Enterococci 30-Day Geometric Means Exceeding 35 CFU/100 mL",
+                                 "% Fecal Coliform 30-Day Geometric Means Exceeding 14 CFU/100 mL",
+                                 "% Fecal Coliform 30-Day Geometric Means Exceeding 200 CFU/100 mL")
+
+
+# save table in csv
+write_csv(gm30_excd_tbl_exp,"output/gm30_value_exceedences.csv")
+
+# print table
+datatable(gm30_excd_tbl_exp,
+          filter = 'top', 
+          options = list(pageLength = 5, autoWidth = TRUE))
+
+```
+
 <br>
 
-##### Figure, frequency of 30-day rolling geometric mean exceedences
+##### Figure, frequency of 30-day rolling geometric mean value exceedences
+
+```{r}
+
+# calculate % of 30-day rolling geometric mean values exceeding thresholds by site/year/threshold type
+gm30_excd <- dat_excd %>%
+  # count number of exceedences by type, site, year
+  group_by(location,data_type,year) %>%
+  mutate(sample_ct = n()) %>%
+  group_by(location,data_type,year,sample_ct) %>%
+  filter(!is.na(gm30_excd)) %>%
+  count(gm30_excd) %>%
+  # what % of individual samples exceeded thresholds during 30-day periods?
+  mutate(pct_gm30_val_excd = (n / sample_ct)) %>%
+  # remove instances of no individual sample exceedences
+  filter(gm30_excd != "no_gm_excd") 
+
+
+
+# plot of % of 30-day rolling geomen values exceeding various thresholds
+gm30_excd %>%
+  ggplot(aes(as.factor(year),pct_gm30_val_excd,fill = gm30_excd)) +
+  geom_col(position = position_dodge(preserve = "single")) +
+  facet_grid(. ~ location, labeller = labeller(location = label_wrap_gen(5))) +
+  #ylim(0,.3) +
+  xlab("") +
+  ylab("% of 30-Day Rolling Geometric Mean Values\nExceeding Thresholds") + 
+  theme_bw() +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  # modify legend text
+  scale_fill_discrete(name="Exceedence Type\n(30-Day Rolling Geometric Mean\nCFU/100 mL)",
+                      breaks = c("gm_ec_excd_35","gm_fc_excd_14","gm_fc_excd_200"),
+                      labels = c("Enterococci > 35",
+                                 "Fecal Coliform > 14",
+                                 "Fecal Coliform > 200")) +
+  col_theme
+
+# save image
+ggsave("output/gm30_val_exceedences.png",width = 10, height = 4)
+
+```
 
 Calculate % exceedence frequency by site, year, and bacteria type for 30-day rolling geometric mean
 
