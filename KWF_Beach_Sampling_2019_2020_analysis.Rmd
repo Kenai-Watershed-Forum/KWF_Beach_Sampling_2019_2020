@@ -59,6 +59,9 @@ points_theme <- theme(axis.title = element_text(size = 14, face = "bold"),
                    legend.text = element_text(size = 14),
                    axis.text = element_text(size = 14),
                    title = element_text(size = 18))
+
+# function to exclude multiple items per column
+'%ni%' <- Negate('%in%')
 ```
 
 <br>
@@ -457,31 +460,163 @@ dat  <- dat %>%
 
 ```{r}
 # create columns of exceedence occurences
-dat  <- dat %>%
-  # individual sample exceedences
+dat 
+
+z <- dat %>%
+  # individual sample exceedence assignments (not considering 30-day prior data yet)
   mutate(indv_excd = case_when(
     (val < 130 & data_type == "Enterococci") ~ "no_indv_excd",
     (val >= 130 & data_type == "Enterococci") ~ "ec_excd_130",
     (val < 31 & data_type == "Fecal Coliform") ~ "no_indv_excd",
     (val >= 31 & val < 400 & data_type == "Fecal Coliform") ~ "fc_excd_31",
-    (val >= 400 & data_type == "Fecal Coliform") ~ "fc_excd_400")) %>%
-  # 30-day rolling geometric mean value exceedences
+    (val >= 400 & data_type == "Fecal Coliform") ~ "fc_excd_400"))  %>%
+     # 30-day rolling geometric mean value exceedence assignments
   mutate(gm30_excd = case_when(
     (gm30 < 35 & data_type == "Enterococci") ~ "no_gm_excd",
     (gm30 >= 35 & data_type == "Enterococci") ~ "gm_ec_excd_35",
     (gm30 < 14 & data_type == "Fecal Coliform") ~ "no_gm_excd",
-    (gm30 >= 14 & val < 200 & data_type == "Fecal Coliform") ~ "gm_fc_excd_14",
-    (gm30 >= 200 & data_type == "Fecal Coliform") ~ "gm_fc_excd_200"))
+    (gm30 >= 14 & gm30 < 200 & data_type == "Fecal Coliform") ~ "gm_fc_excd_14",
+    (gm30 >= 200 & data_type == "Fecal Coliform") ~ "gm_fc_excd_200")) %>%
+
+  # prep for next steps
+  mutate(obs = 1) %>%
+  group_by(data_type,location,year) %>%
+  
+  # how many samples do we have from the last 30 days?
+  mutate(grp_sample_ct = rollapplyr(obs, 1:n() - findInterval(date - days(30), date), 
+                           sum, fill = NA, partial = T)) %>%
+  
+  # apply numeral if individual sample exceedence observed
+  mutate(indv_excd_ct = case_when(
+    (indv_excd != "no_indv_excd" ~ 1))) %>%
+  ungroup() %>%
+  select(location,year,date,data_type,gm30,val,gm30_excd,indv_excd,grp_sample_ct, indv_excd_ct) %>%
+  
+  # spread indv exceedence classes in to columns
+  spread(indv_excd, indv_excd_ct) %>%
+  group_by(location,year,data_type) %>%
+    
+  # replace NAs with zeros so that rollapplyr can work in the next step
+  mutate_at(vars(ec_excd_130,fc_excd_31,fc_excd_400), ~replace_na(., 0)) %>%
+  
+  # for each individual sample exceedence class, what percentage of samples have exceeded thresholds over the last 30 days?
+  ## enterococci > 130
+  mutate(ec_excd_130_30day_pct = ((rollapplyr(ec_excd_130, 1:n() - findInterval(date - days(30), date), 
+                                           sum, fill = NA, partial = T)) / grp_sample_ct) * 100) %>%
+  ## fecal coliform > 31
+  mutate(fc_excd_31_30day_pct = ((rollapplyr(fc_excd_31, 1:n() - findInterval(date - days(30), date), 
+                                           sum, fill = NA, partial = T)) / grp_sample_ct) * 100) %>%
+  ## fecal coliform > 400
+  mutate(fc_excd_400_30day_pct = ((rollapplyr(fc_excd_400, 1:n() - findInterval(date - days(30), date), 
+                                           sum, fill = NA, partial = T)) / grp_sample_ct) * 100) %>%
+  
+  arrange(location,data_type,date) %>%
+  
+  # if >10%, assign exceedence class per regs
+  
+  # modify to create this all in one column rather than 3
+  
+  
+  mutate(ec_excd_130_30day = case_when((ec_excd_130_30day_pct > 10) ~ "ec_excd_130"),
+         fc_excd_31_30day = case_when((fc_excd_31_30day_pct > 10) ~ "fc_excd_31"),
+         fc_excd_400_30day = case_when((fc_excd_400_30day_pct > 10) ~ "fc_excd_400")) %>%
+  
+  
+  # woeking here to format for use in tile plot!
+  
+  
+  
+  select(location,year,data_type,date,gm30_excd,
+         ec_excd_130_30day,
+         fc_excd_31_30day,
+         fc_excd_400_30day)
+
+  
+
+
+
+# working here to maybe adapt code from chunk 13 to prep for plot in chunk 12
+
+
 ```
 
 <br>
 
-Calculate percent of individual sample values in rolling 30-day period exceeding thresholds
+
+
+
+figure not ready; skip
+
+Create figure of day or year vs exceedence observation.  Highlight start/stop of dipnet sesason
+```{r}
+# min and max sample dates within  the 2019-2020 sample seasons
+minmaxdates <- dat %>%
+  ungroup() %>%
+  mutate(day = yday(date)) %>%
+  summarise(mindate = min(day),
+            maxdate = max(day))
+
+# tile plot
+#(tileplot 
+  
+  (z <- dat %>%
+    
+    # prep data for plotting
+  select(location,data_type,date,year,indv_excd,gm30_excd) %>%
+  pivot_longer(cols = c("indv_excd","gm30_excd"),names_to = "excd_class", values_to = "excd_val") %>%
+  filter(!is.na(excd_val),
+          excd_val %ni% c("no_gm_excd","no_indv_excd","")) %>%
+  mutate(day = yday(date),
+         date = ymd(date)) %>%
+    
+     # plot
+    ggplot(aes(date,excd_val)) +
+    geom_tile(aes(fill = excd_val)) +
+    facet_grid(location ~ year, scales = "free_x", labeller = labeller(location = label_wrap_gen(5))) +
+    xlab("") +
+    ylab("") +
+    scale_x_date(labels = date_format("%b-%d")) +
+    theme_bw() +
+     theme(strip.text.y = element_text(angle = 0),
+           axis.text.x = element_text(angle = 35, margin = margin(t=20)),
+           axis.text.y = element_blank(),
+           legend.direction = "vertical",
+           legend.position = "bottom") +
+    scale_y_discrete(breaks=NULL) +
+    
+    # modify legend text
+    scale_fill_discrete(name="Exceedence Type (CFU/100 mL)",
+                      breaks = c("ec_excd_130",
+                                 "gm_ec_excd_35",
+                                 "fc_excd_31",
+                                 "gm_fc_excd_14",
+                                 "fc_excd_400"),
+                      labels = c("Contact Recreation (10% of Enterococci Samples > 130 in Prior 30 Days)",
+                                 "Contact Recreation (30-Day Geometric Mean Enterococci > 35)",
+                                 "Raw Aquatic Life Consumption (10% of Fecal Coliform Samples > 31 in Prior 30 Days)",
+                                 "Raw Aquatic Life Consumption (30-Day Geometric Mean Fecal Coliform > 14)",
+                                 "Secondary Recreation (10% of Fecal Coliform Samples > 400 in Prior 30 Days)")) +
+    points_theme
+)
+
+# save plot
+ggsave("output/exceedence_by_date.png", width = 10, height = 11)
+
+# shoot... does the indv samp assignment acct for 3 days prior data or just indv val?
+
+```
+
+
+<br>
+
+Perform calculations to determine if 10% of individual sample values in prior rolling 30 day period have exceeded thresholds
+Format as wide table for easier viewing in report
 
 ```{r}
 
 z <- dat %>%
   filter(!is.na(val)) %>%
+  select(location,year,date,data_type,val,gm30,units,qualifier,indv_excd,gm30_excd) %>%
   group_by(data_type,location,year) %>%
   mutate(obs = 1) %>%
 
@@ -513,7 +648,7 @@ z <- dat %>%
                            sum, fill = NA, partial = T)) %>%
   
   # retain only instances with 30 days of prior observations
-  filter(!is.na(gm30)) %>%
+ # filter(!is.na(gm30)) %>%
   
   # calculate percentage of individual samples exceeding various thresholds in previous 30 days
   
@@ -527,45 +662,44 @@ z <- dat %>%
   ungroup() %>%
   arrange(data_type,location,year,date)
 
-
-# want to retain gm30 column alongside others; currently stacked
-
-## messy steps below
-
-## discovered here:  there are some repeat days w/ diff gm30 values.  need to check earlier grouping factors; like the ones used to calc gm30.  will make possible to use spread fxn correctly once resolved
-
-
-
+# pivot
 z1 <- z %>%
-  select(data_type,date,location,gm30) %>%
-  spread(data_type,gm30)
-  
-ec <- z %>%
+  pivot_longer(cols = contains("gm30_"), names_to = "test", values_to = "val")
+
+
+# maybe
+# prep wide format for view in report
+z1 <- z %>%
+  select(data_type,location,date,gm30)
+
+ec <- z1 %>%
   filter(data_type == "Enterococci") %>%
-  select(location,date,gm30) %>%
-  rename(gm30_ec = gm30)
+  rename(gm30_ec = gm30) %>%
+  select(-data_type)
 
-fc <- z %>%
+fc <- z1 %>%
   filter(data_type == "Fecal Coliform") %>%
-  select(location,date,gm30) %>%
-  rename(gm30_fc = gm30)
+  rename(gm30_fc = gm30) %>%
+  select(-data_type)
 
-z1 <- left_join(ec,fc,by = c("location","date"))
-
-
-# final table to print; export to excel file? or can r generate a color scheme down-column like excel?
-x <- left_join(z,z1)
-
-# two gm30 cells are NA but other column shows an exceedence on that day... find out why
-# final:  publish each site as an indv page, highlight cell values w/ exceedences; pair w/ horizon geom segment vs day of
-
-
-
+x <- z %>%
+  ungroup() %>%
+  select(-data_type,-gm30) %>%
+  left_join(ec) %>%
+  left_join(fc) 
   
+
+# modify column names
+
+
+# make table long and refdo tile figure
 
 ```
 
 <br>
+
+
+### reconsider all code belwo here base on corrected excd designation interpretation
 
 Calculate % exceedence frequency by site, year, and bacteria type for individual samples
 
