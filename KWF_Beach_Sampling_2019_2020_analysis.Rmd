@@ -554,7 +554,7 @@ dat  <- dat %>%
 
 <br>
 
-Assign exceedence criteria for 30-day geometric means and indivdual sample values
+Assign exceedence criteria for 30-day geometric means and individual sample values
 
 ```{r}
 # create columns of exceedence occurences

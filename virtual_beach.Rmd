@@ -1,0 +1,236 @@
+---
+title: "virtual_beach"
+output:
+  html_document: 
+    fig_width: 10
+    fig_height: 6
+    fig_caption: yes
+    code_folding: hide
+    toc: yes
+    toc_depth: 4
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+editor_options: 
+  chunk_output_type: inline
+---
+
+Document last updated `r Sys.time()` by Benjamin Meyer ([ben\@kenaiwatershed.org](mailto:ben@kenaiwatershed.org){.email})
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = F, message = F)
+
+# clear environment
+rm(list=ls())
+
+# load packages
+library(tidyverse)
+library(lubridate)
+library(readr)
+library(readxl)
+library(writexl)
+library(hms)
+library(plotly)
+library(DT)
+library(xlsx)
+library(leaflet)
+library(DT)
+library(ggpubr)
+library(plotrix)
+library(zoo)
+library(psych)
+library(janitor)
+library(scales)
+library(naniar)
+
+select <- dplyr::select
+
+# set plotting themes
+
+## geom_col plots theme
+col_theme <- theme(axis.title = element_text(size = 14, face = "bold"),
+                   strip.text = element_text(size = 14, face = "bold"),
+                   legend.title = element_text(size = 14, face = "bold"),
+                   legend.text = element_text(size = 14),
+                   axis.text = element_text(size = 14))
+
+## geom_points plots theme
+points_theme <- theme(axis.title = element_text(size = 14, face = "bold"),
+                   strip.text = element_text(size = 14, face = "bold"),
+                   legend.title = element_text(size = 14, face = "bold"),
+                   legend.text = element_text(size = 14),
+                   axis.text = element_text(size = 14),
+                   title = element_text(size = 18))
+
+# function to exclude multiple items per column
+'%ni%' <- Negate('%in%')
+```
+
+<br>
+
+This draft document prepares and examines data from the EPA BEACON beach database that will be used in implementing the EPA Virtual Beach model for North and South Kenai Beach
+
+<br>
+
+Notes:
+
+-   Data was downloaded as a csv file from EPA BEACON repository using the "reports" function in December 2020 (<https://watersgeo.epa.gov/BEACON2/reports.html>). Contains data 2012 - 2019.
+
+-   To do: update data import process to include results from other years when available (pre-2012, and from 2020).
+
+-   Script in development using guidance from virtual beach user manual at <https://www.epa.gov/sites/production/files/2016-03/documents/vb3_manual_3.0.6.pdf>
+
+-   World Meteorological Organization (WMO) 4501 weather codes at https://www.jodc.go.jp/data_format/weather-code.html 
+
+-   Watch out for mixed use of metric and standard units in original import from EPA database...
+
+-   Need to get associated coordinates for each site
+
+-   Data for Kenai Gull Rookery 2 and Warren Ames bridge sites not in output folder yet... where are they?  Maybe not in this DB on purpose?  Check w/ beacon db again.
+
+<br>
+
+### Data import
+
+Import and prepare csv file from EPA BEACON database in local project folder
+
+```{r}
+# choose variables to retain
+vars <- as.character(c("Year",
+                       "StationID.Def..",
+                       "Station.Name..Def..",
+                       "StartDate.Def..",
+                       "StartTime.Def..",
+                       "ActivityTypeCode.Def..",
+                       "CharacteristicName.Def..",
+                       "Result.Value.Def..",
+                       "Result.MeasureUnit",
+                       "Result.Comment.Def..",
+                       "ActivityDepthValue.Def.."))
+
+# rename variables
+new_vars <- c("year",
+              "station_id",
+              "site",
+              "date",
+              "time",
+              "sample_activity",
+              "sample_type",
+              "sample_value",
+              "sample_unit",
+              "sample_comment",
+              "sample_depth_m")
+
+
+# read in data
+dat <- read.csv("data/epa_historical_data.csv") %>%
+  select(all_of(vars))
+
+# rename columns
+colnames(dat) <- new_vars
+
+# format col type 
+dat <- dat %>%
+  mutate(datetime = dmy_hms(paste(date,time))) %>%
+  transform(date = dmy(date),
+            time = hms::as_hms(time),
+            sample_value = as.numeric(sample_value),
+            sample_type = as.factor(sample_type)) %>%
+  # remove missing values
+  filter(!is.na(sample_value)) 
+
+# convert all measurement units to METRIC for consistency... sheesh
+dat <- dat %>%
+  
+  # farenheight to celsius
+  mutate(sample_value = ifelse(sample_unit == "deg F", (sample_value - 32) / 1.8, sample_value)) %>%
+  mutate(sample_unit = ifelse(sample_unit == "deg F", "deg C",sample_unit)) %>%
+  
+  # miles per hour to kph
+  mutate(sample_value = ifelse(sample_unit == "mph",(sample_value*1.609344), sample_value)) %>%
+  mutate(sample_unit = ifelse(sample_unit == "mph", "kph",sample_unit)) %>%
+  
+  # feet to meters
+  mutate(sample_value = ifelse(sample_unit == "ft",(sample_value*0.3048), sample_value)) %>%
+  mutate(sample_unit = ifelse(sample_unit == "ft", "m",sample_unit)) %>%
+  
+  # knots to meters per second
+  mutate(sample_value = ifelse(sample_unit == "knots",(sample_value*0.51), sample_value)) %>%
+  mutate(sample_unit = ifelse(sample_unit == "knots", "mps",sample_unit)) 
+
+
+# modify sample type names
+dat <- dat %>%
+  mutate(sample_type = str_replace_all(
+    sample_type,
+    c("Temperature, air" = "air_temp_C",
+      "Temperature, water" = "water_temp_C",
+      "Fecal Coliform" = "fecal_coliform_cfu_100mL",
+      "Enterococcus" = "enterococcus_mpn_100mL",
+      "Tide range" = "tide_range_m",
+      "Wind velocity" = "wind_velocity_kph",
+      "Conductivity" = "conductivity_mS_cm",
+      "Turbidity" = "turbidity_NTU"
+      )))
+
+# some sample type names are stubborn and will not readily modify... may have hidden spaces or other formatting
+# use another method
+# filter and rename the stubborn sample types
+weather <- dat %>%
+  filter(sample_type == "Weather condition (WMO code 4501) (choice list)") %>%
+  mutate(sample_type = "weather_code_wmo4501")
+
+wind <- dat %>%
+  filter(sample_type == "Wind direction (direction from, expressed 0-360 deg)") %>%
+  mutate(sample_type = "wind_direction_deg")
+
+# rejoin to overall dataset
+dat <- dat %>%
+  filter(sample_type %ni% c("Weather condition (WMO code 4501) (choice list)",
+                            "Wind direction (direction from, expressed 0-360 deg)")) %>%
+  bind_rows(weather,wind)
+
+# make environmental variables "wide" format so they each have their own column
+dat <- dat %>%
+  mutate(row_id = row_number()) %>%
+  # remove unneeded columns for clean pivot
+  select(site,date,time,datetime,sample_type,sample_value) %>%
+  
+  distinct() %>%
+
+  # make wider
+  #spread(sample_type,sample_value)
+  
+  pivot_wider(names_from = sample_type,
+              values_from = sample_value) %>%
+  unnest(cols = c(water_temp_C, air_temp_C, fecal_coliform_cfu_100mL, enterococcus_mpn_100mL, 
+    pH, turbidity_NTU, conductivity_mS_cm, wind_velocity_kph, 
+    tide_range_m, weather_code_wmo4501, wind_direction_deg)) %>%
+  
+  distinct() %>%
+
+  # arrange rows chronologically by site
+  arrange(site,datetime) 
+
+# print table
+datatable(dat,
+          filter = 'top', 
+          options = list(pageLength = 5, autoWidth = TRUE))
+  
+```
+<br>
+
+Export csv files to local project folder
+```{r}
+
+# export csv to local output folder
+dir.create("output/virtual_beach_data")
+
+# all overall data
+write_csv(dat,"output/vb_data_format.csv",row.names = F)
+ 
+# individual csv for each site
+dat %>%
+  group_by(site) %>%
+  do(write_csv(., paste0("output/virtual_beach_data/",unique(.$site), ".csv")))
+```
