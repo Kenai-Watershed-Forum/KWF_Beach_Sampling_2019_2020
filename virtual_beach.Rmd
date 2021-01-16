@@ -41,7 +41,6 @@ library(zoo)
 library(psych)
 library(janitor)
 library(scales)
-library(naniar)
 
 select <- dplyr::select
 
@@ -74,19 +73,15 @@ This draft document prepares and examines data from the EPA BEACON beach databas
 
 Notes:
 
--   Data was downloaded as a csv file from EPA BEACON repository using the "reports" function in December 2020 (<https://watersgeo.epa.gov/BEACON2/reports.html>). Contains data 2012 - 2019.
-
--   To do: update data import process to include results from other years when available (pre-2012, and from 2020).
+-   Data was downloaded as a csv file from EPA BEACON repository using the "reports" function in December 2020 (<https://watersgeo.epa.gov/BEACON2/reports.html>). Contains data 2010 - 2020.
 
 -   Script in development using guidance from virtual beach user manual at <https://www.epa.gov/sites/production/files/2016-03/documents/vb3_manual_3.0.6.pdf>
 
--   World Meteorological Organization (WMO) 4501 weather codes at https://www.jodc.go.jp/data_format/weather-code.html 
+-   World Meteorological Organization (WMO) 4501 weather codes at <https://www.jodc.go.jp/data_format/weather-code.html>
 
 -   Watch out for mixed use of metric and standard units in original import from EPA database...
 
 -   Need to get associated coordinates for each site
-
--   Data for Kenai Gull Rookery 2 and Warren Ames bridge sites not in output folder yet... where are they?  Maybe not in this DB on purpose?  Check w/ beacon db again.
 
 <br>
 
@@ -156,7 +151,12 @@ dat <- dat %>%
   
   # knots to meters per second
   mutate(sample_value = ifelse(sample_unit == "knots",(sample_value*0.51), sample_value)) %>%
-  mutate(sample_unit = ifelse(sample_unit == "knots", "mps",sample_unit)) 
+  mutate(sample_unit = ifelse(sample_unit == "knots", "mps",sample_unit)) %>%
+  
+  # inches to meters
+  # knots to meters per second
+  mutate(sample_value = ifelse(sample_unit == "in",(sample_value*0.0254), sample_value)) %>%
+  mutate(sample_unit = ifelse(sample_unit == "in", "m",sample_unit)) 
 
 
 # modify sample type names
@@ -170,7 +170,8 @@ dat <- dat %>%
       "Tide range" = "tide_range_m",
       "Wind velocity" = "wind_velocity_kph",
       "Conductivity" = "conductivity_mS_cm",
-      "Turbidity" = "turbidity_NTU"
+      "Turbidity" = "turbidity_NTU",
+      "Wave height" = "wave_height_m"
       )))
 
 # some sample type names are stubborn and will not readily modify... may have hidden spaces or other formatting
@@ -190,22 +191,149 @@ dat <- dat %>%
                             "Wind direction (direction from, expressed 0-360 deg)")) %>%
   bind_rows(weather,wind)
 
-# make environmental variables "wide" format so they each have their own column
-dat <- dat %>%
-  mutate(row_id = row_number()) %>%
-  # remove unneeded columns for clean pivot
-  select(site,date,time,datetime,sample_type,sample_value) %>%
-  
-  distinct() %>%
+```
 
-  # make wider
-  #spread(sample_type,sample_value)
+<br>
+
+#### Data summary
+
+```{r}
+# summarise
+tbl <- dat %>%
+  # treat weather codes separately; they are not a continuous variable
+  #filter(sample_type != "weather_code_wmo4501") %>%
+  group_by(site,sample_type) %>%
+  summarise(n = n(),
+            mean = round(mean(sample_value),digits = 1),
+            min = round(min(sample_value),digits = 1),
+            max = round(max(sample_value),digits = 1),
+            stderr = round(std.error(sample_value), digits = 1),
+            min_year = min(year),
+            max_year = max(year))
+
+# print table
+datatable(tbl,
+          filter = 'top', 
+          options = list(pageLength = 8, autoWidth = TRUE))
+
+```
+
+<br>
+
+Notes:
+
+-   There are some observations from 2010 at a site called "Kenai North Beach." This site name nomenclature is different than all the other years. Need to find out which North Kenai Beach site these data are from.
+-   WMO Weather codes are not a continuous variable, so mean and std. error do not apply and are spurious values in the above table.
+
+<br>
+
+------------------------------------------------------------------------
+
+#### Replicate samples
+
+Apply criteria for replicate sample values.
+
+-   How many replicate samples do we have?
+
+```{r}
+# how many replicate samples do we have?
+rep_ct <- dat %>%
+  #filter(data_type %in% c("Enterococci","Fecal Coliform","Microbial Source Tracking")) %>%
+  group_by(site,date,time,sample_type) %>%
+  count(name = "rep_set") %>%
+  ungroup() %>%
+  filter(rep_set > 1) %>%
+  group_by(sample_type,rep_set) %>%
+  count(name = "count")
+
+datatable(rep_ct)
+
   
+```
+
+For each sample type, "rep_set" indicates the quantity of simultaneously collected samples in a given instance, and "count" indicates the quantity of instances with simultaneous sample results. For example, as of Jan 15, 2021, we have 81 instances where 2 replicates of "enterococcus_mpn_100mL" exist.
+
+<br>
+
+To employ this data in the Virtual Beach model, we need a single value for each sample type and sampling event.
+
+For environmental variables (temperature, wind, etc), we will create an average value.
+
+For bacteria concentrations however, variation between duplicates can be substantial. ADEC has existing protocol to address this. As per ADEC CALM protocol, "where two replicate values exist, only the higher of the two values are used in further analyses."
+
+In this data set we have additional instances where not just two replicate samples for bacteria concentrations exist, but also instances of 3, 4, 5, and 6 replicates. In these instances also, we will apply the protocol of including only the highest value.
+
+<br>
+
+Apply criteria described above
+
+```{r}
+# create list of environmental variables
+enviro_vars <- c("wind_velocity_kph",
+                 "wave_height_m",
+                 "water_temp_C",
+                 "tide_range_m",
+                 "air_temp_C",
+                 "conductivity_mS_cm",
+                 "pH",
+                 "wind_direction_deg")
+
+# max number of replicate environmental measurements is 2
+
+# create means for environmental variables
+enviro_dat <- dat %>%
+  filter(sample_type %in% enviro_vars) %>%
+  group_by(across(c(-sample_value,-sample_activity,-sample_comment))) %>%
+  summarise(mean_sample_value = mean(sample_value)) %>%
+  ungroup()
+
+# retain only the highest value in instances where replicate bacteria concentrations values exist
+bac_dat <- dat %>%
+  filter(sample_type %in% c("fecal_coliform_cfu_100mL","enterococcus_mpn_100mL")) %>%
+  group_by(across(c(-sample_value,-sample_activity,-sample_comment))) %>%
+  
+  # where pairs of two replicate samples exist, retain only the higher of the two values.  
+  filter(sample_value == max(sample_value)) %>%
+  
+  # if two identical replicate values are present, we want to retain only one of the values
+  ungroup() %>%
+  group_by(across(c(-sample_value,-sample_activity,-sample_comment))) %>%
+  summarise(mean_sample_value = mean(sample_value))  
+
+# rejoin bacteria and enviro data
+dat <- bind_rows(enviro_dat,bac_dat)
+
+```
+
+<br>
+
+Prep for export
+
+Work in progress here Jan 15, 2021
+```{r}
+# make environmental variables "wide" format so they each have their own column
+dat 
+
+z <- dat %>%
+
+  # remove unneeded columns for clean pivot
+  ungroup() %>%
+  select(site,date,time,datetime,sample_type,mean_sample_value) %>%
+  distinct() %>%
+  
+  # make wider
   pivot_wider(names_from = sample_type,
-              values_from = sample_value) %>%
+              values_from = mean_sample_value) 
+
+# dup values just left for fc 2011 data... why?
+
+z1 <- dat %>%
+  filter(sample_)
+  
+  #%>%
   unnest(cols = c(water_temp_C, air_temp_C, fecal_coliform_cfu_100mL, enterococcus_mpn_100mL, 
     pH, turbidity_NTU, conductivity_mS_cm, wind_velocity_kph, 
-    tide_range_m, weather_code_wmo4501, wind_direction_deg)) %>%
+    tide_range_m, weather_code_wmo4501, wave_height_m,wind_direction_deg)) %>%
   
   distinct() %>%
 
@@ -218,9 +346,11 @@ datatable(dat,
           options = list(pageLength = 5, autoWidth = TRUE))
   
 ```
+
 <br>
 
 Export csv files to local project folder
+
 ```{r}
 
 # export csv to local output folder
