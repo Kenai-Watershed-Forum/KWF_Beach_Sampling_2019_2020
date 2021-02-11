@@ -41,6 +41,8 @@ library(zoo)
 library(psych)
 library(janitor)
 library(scales)
+library(leaflet)
+library(htmltools)
 
 select <- dplyr::select
 
@@ -82,6 +84,61 @@ Notes:
 <br>
 
 ------------------------------------------------------------------------
+
+### Sampling Sites
+
+```{r}
+# read in coordinates
+beach_sites <- read_excel("data/2020 Beach Sampling Compiled Results_FINALREPORT.xlsx", sheet = "2019-2020_FinalReport_SampSites", skip = 1) 
+
+# create map title
+tag.map.title <- tags$style(HTML("
+  .leaflet-control.map-title { 
+    transform: translate(-50%,20%);
+    position: fixed !important;
+    left: 50%;
+    text-align: center;
+    padding-left: 10px; 
+    padding-right: 10px; 
+    background: rgba(255,255,255,0.75);
+    font-weight: bold;
+    font-size: 22px;
+  }
+"))
+title <- tags$div(
+  tag.map.title, HTML("Kenai River Beach Sampling Locations")
+)  
+
+
+# create map
+beach_sites %>%
+  leaflet() %>%
+  # choose base map
+  addProviderTiles(providers$Esri.WorldImagery) %>%  
+  # set map center
+  setView(-151.214545, 60.538691, zoom = 12.4) %>%
+  # add map title
+  addControl(title, position = "topleft", className="map-title") %>%
+ 
+   addCircleMarkers(~Longitude, ~Latitude, 
+                    radius = 9,
+             popup = paste("Site Name" = beach_sites$`Site Name`,"<br>",
+                           "Site Description" = beach_sites$`Site description`)) %>%
+  
+  # add site labels
+  addLabelOnlyMarkers(~Longitude, ~Latitude, label =  beach_sites$`Site ID`, 
+                      labelOptions = labelOptions(noHide = T, 
+                                                  direction = 'right', 
+                                                  textOnly = T,
+                                                  textsize = "12px",
+                                                  style = list("color" = "white", 
+                                                               "font-weight" = "bold",
+                                                               "font-size" = "14px")))
+
+
+```
+
+<br>
 
 ### Read in data
 
@@ -185,7 +242,7 @@ Notes post data read-in:
 Procedure:
 
 -   Recreate tables (approximately) found in provided excel file ("2020 Beach Sampling Compiled Results_FINALREPORT.xlsx") to verify values
--   Create figures to visualize exceedence data
+-   Create figures to visualize Exceedance data
 
 <br>
 
@@ -211,7 +268,6 @@ rep_ct <- dat %>%
   count(name = "count")
 
 datatable(rep_ct)
-
   
 ```
 
@@ -231,6 +287,7 @@ rep_diff <- dat %>%
   transform(val = as.numeric(val)) %>%
   select(location,date,data_type,val) %>%
   group_by(location,date,data_type) %>%
+  
   # calculate percent difference between instances of two replicate samples
   mutate(diff = abs(lag(val) - val)) %>%
   mutate(lagsum = val + lag(val)) %>%
@@ -246,8 +303,8 @@ datatable(rep_diff,
 <br>
 
 Replicate difference summary table
-```{r}
 
+```{r}
 # summarise
 rep_diff_summary <- rep_diff %>%
   group_by(data_type) %>%
@@ -284,7 +341,7 @@ A relationship between magnitude of sample value or date and percent difference 
 
 As per ADEC CALM protocol, where two replicate values exist, only the higher of the two values are used in further analyses.
 
-***
+------------------------------------------------------------------------
 
 <br>
 
@@ -370,10 +427,30 @@ mst_tbl <- mst_dat %>%
   # replace results DNQ and ND with zero and convert to numeric
   mutate(val = as.numeric(str_replace_all(val,c("DNQ" = "0", "ND" = "0"))))
 
+# prep custom legend format functions from stack overflow: https://stackoverflow.com/questions/11366964/is-there-a-way-to-change-the-spacing-between-legend-items-in-ggplot2
+
+
+draw_key_polygon3 <- function(data, params, size) {
+  lwd <- min(data$size, min(size) / 4)
+  
+  grid::rectGrob(
+    width = grid::unit(0.7, "npc"),
+    height = grid::unit(0.7, "npc"),
+    gp = grid::gpar(
+      col = data$colour,
+      fill = alpha(data$fill, data$alpha),
+      lty = data$linetype,
+      lwd = lwd * .pt,
+      linejoin = "mitre"
+    ))
+}
+GeomBar$draw_key = draw_key_polygon3
+
+
 # plot
 mst_tbl %>%
   ggplot(aes(as.factor(date),val, fill = analytical_method)) +
-  geom_col(position = "dodge") +
+  geom_col(position = "dodge", key_glyph = "polygon3") +
   facet_grid(.~location, labeller = labeller(location = label_wrap_gen(5))) +
   xlab("") +
   ylab("Concentration (Copies/100 mL)") +
@@ -384,11 +461,13 @@ mst_tbl %>%
                          labels=c("Dog", "Gull", "Human")) +
   # theme 
   theme(axis.text.x = element_text(vjust = .5, angle = 85),
-        strip.text.y = element_text(angle = 0)) +
+        strip.text.y = element_text(angle = 0),
+        legend.key.size = unit(1.4,"cm")) +
   col_theme
 
 # save plot
 ggsave("output/mst_kenai_beach_2019_2020.png", width = 12, height = 6)
+
 ```
 
 <br>
@@ -405,9 +484,11 @@ bac_tbl <- dat %>%
   filter(data_type %in% c("Enterococci","Fecal Coliform")) %>% 
   arrange(location,date,data_type) %>%
   select(date,location,data_type,val) %>%
+  
   # replace results DNQ and ND with zero and convert to numeric
   mutate(val = as.numeric(str_replace_all(val,c("DNQ" = "0", "ND" = "0")))) %>%
-  # use day of year for x axis and year for facet grid
+ 
+   # use day of year for x axis and year for facet grid
   mutate(day = yday(date),
          year = year(date))
 
@@ -509,19 +590,59 @@ ggsave("output/fecal_coliform_conc_2019_2020.png", width = 10, height = 4)
 
 ------------------------------------------------------------------------
 
-### Exeedence Frequency
+### Exeedence Frequency Definitions
 
 Define ADEC threshold values
 
--   Enterococci:
+Fecal coliform and enterococci analyses results from the 2020 monitoring seasons were evaluated based on the Alaska Water Quality Standards for marine water (18 AAC 70 (14)) (Table 2). Results were evaluated both for in-season management standards, and post-season retrospective analysis. A minimum of five samples were used to calculate a geometric mean, and when two sub-criteria are specified (i.e., geometric mean and 10% of samples in a season), both criteria must both be met or the site fails the standard.
 
-    -   "In a 30-day period, the geometric mean of samples may not exceed 35 enterococci CFU/100 mL, and not more than 10% of the samples may exceed a statistical threshold value (STV) of 130 CFU/100 mL."
+Results were evaluated as follows:
 
--   Fecal coliform:
+[*Fecal coliform*]{.ul}
 
-    -   "Harvest for consumption of raw mollusks or other raw seafood: The geometric mean of samples may not exceed 14 fecal coliform/100 ml; and not more than 10% of the samples may exceed 31 CFU/100 mL for a membrane filtration test."
+Fecal coliform exceedances were determined based on standards set for:
 
-    -   "Water recreation, secondary: In a 30-day period, the geometric mean of samples may not exceed 200 fecal coliform/100 mL, and not more than 10% of the samples may exceed 400 fecal coliform/100 mL."
+1)  Secondary water recreation
+
+    a.) In-season exceedances for secondary contact recreation were identified when
+
+    i.) Individual fecal coliform sample values exceeded 400 CFU/100 mL, or
+
+    ii.) The geometric mean of fecal coliform samples exceeded 200 CFU/100 mL over a 30 day period.
+
+    b.) Post-season site exceedances were identified post-season if 10% of fecal coliform sample values exceeded 400 CFU/100 mL.
+
+<!-- -->
+
+2)  Harvesting raw aquatic life for consumption
+
+    a.) In-season exceedances for harvesting raw aquatic life for consumption were identified when
+
+    i.) Individual fecal coliform samples exceeded 31 CFU/100 mL
+
+    b.) Post-season site exceedances were identified when
+
+    i.) 10% of fecal coliform samples from season exceeded 31 CFU/100 mL, or
+
+    ii.) The geometric mean of fecal coliform samples from the season exceeded 14 CFU/100 mL.
+
+[*Enterococci*]{.ul}
+
+Enterococci exceedances were determined based on standards set for:
+
+1)  Contact recreation
+
+    a.) In-season exceedances for contact recreation were identified when
+
+    i.) Individual enterococci samples exceeded 130 CFU/100 mL, or
+
+    ii.) The geometric mean of enterococci samples exceeded 35 CFU/100 mL over a 30 day period.
+
+    b.) Post-season site exceedances were identified when 10% of enterococci samples from the season exceeded 130 CFU/ 100 mL
+
+Other notes:
+
+-   When a contact or secondary recreation exceedance occurred during the recreational season, a public advisory was issued by ADEC. Advisories were active until two consecutive weeks of bacteria concentrations below exceedance criteria were achieved. When an exceedance for harvesting raw aquatic life for consumption occurred, the ADEC seafood monitoring group was notified with an online notice.
 
 <br>
 
@@ -531,6 +652,8 @@ General Data Notes
 
 <br>
 
+### Exeedence Frequency Analysis
+
 Calculate 30-day rolling geometric mean values for Enterococci and Fecal Coliform concentrations
 
 ```{r}
@@ -538,11 +661,13 @@ dat  <- dat %>%
   filter(data_type %in% c("Fecal Coliform","Enterococci")) %>%
   mutate(year = year(date)) %>%
   transform(val = as.numeric(val)) %>%
+  
   # use 50% of value if it has an "Undetected" qualifier
   mutate(val = ifelse(is.na(qualifier),val,
                       ifelse(qualifier == "U",(val*.5),val))) %>%
   group_by(data_type,location,year) %>%
   arrange(year,data_type,location,date) %>%
+  
   # calculate 30 day rolling geometric means
   mutate(gm30 = rollapplyr(val, 1:n() - findInterval(date - days(30), date), 
                            geometric.mean, fill = NA, partial = T)) %>%
@@ -554,162 +679,56 @@ dat  <- dat %>%
 
 <br>
 
-Assign exceedence criteria for 30-day geometric means and individual sample values
+Assign exceedance criteria for 30-day geometric means and individual sample values
 
 ```{r}
-# create columns of exceedence occurences
-dat  <- dat %>%
-  # individual sample exceedence assignments (not considering 30-day prior data yet)
+# create columns of Exceedance occurrences; individual and 30-day geometric means
+
+# reshape dataframe
+dat <- dat %>%
+  rename("value" = "val") %>%
+
+  # apply inseason criteria
+  
+  ## individual sample exceedances
   mutate(indv_excd = case_when(
-    (val < 130 & data_type == "Enterococci") ~ "no_indv_excd",
-    (val >= 130 & data_type == "Enterococci") ~ "ec_excd_130",
-    (val < 31 & data_type == "Fecal Coliform") ~ "no_indv_excd",
-    (val >= 31 & val < 400 & data_type == "Fecal Coliform") ~ "fc_excd_31",
-    (val >= 400 & data_type == "Fecal Coliform") ~ "fc_excd_400"))  %>%
-     # 30-day rolling geometric mean value exceedence assignments
+    (value < 31 & data_type == "Fecal Coliform") ~ "no_indv_excd",
+    (value >= 400 & data_type == "Fecal Coliform") ~ "fc_excd_400",
+    (value >= 31 & value < 400 & data_type == "Fecal Coliform") ~ "fc_excd_31")) %>%
+  
+  ## 30 day rolling geometric mean exceedances
   mutate(gm30_excd = case_when(
-    (gm30 < 35 & data_type == "Enterococci") ~ "no_gm_excd",
-    (gm30 >= 35 & data_type == "Enterococci") ~ "gm_ec_excd_35",
-    (gm30 < 14 & data_type == "Fecal Coliform") ~ "no_gm_excd",
-    (gm30 >= 14 & gm30 < 200 & data_type == "Fecal Coliform") ~ "gm_fc_excd_14",
+    (gm30 < 200 & data_type == "Fecal Coliform") ~ "no_gm_excd",
     (gm30 >= 200 & data_type == "Fecal Coliform") ~ "gm_fc_excd_200")) %>%
-
-  # prep for next steps
-  mutate(obs = 1) %>%
-  group_by(data_type,location,year) %>%
   
-  # how many samples do we have from the last 30 days?
-  mutate(grp_sample_ct = rollapplyr(obs, 1:n() - findInterval(date - days(30), date), 
-                           sum, fill = NA, partial = T)) %>%
+  # enterococci
   
-  # apply numeral if individual sample exceedence observed
-  mutate(indv_excd_ct = case_when(
-    (indv_excd != "no_indv_excd" ~ 1))) %>%
-  ungroup() %>%
-  select(location,year,date,data_type,gm30,val,gm30_excd,indv_excd,grp_sample_ct, indv_excd_ct) %>%
-  
-  # spread individual exceedence classes in to columns
-  spread(indv_excd, indv_excd_ct) %>%
-  group_by(location,year,data_type) %>%
-    
-  # replace NAs with zeros so that rollapplyr can work in the next step
-  mutate_at(vars(ec_excd_130,fc_excd_31,fc_excd_400), ~replace_na(., 0)) %>%
-  arrange(location,data_type,date) %>%
-  
-  # for each individual sample exceedence class, what percentage of samples have exceeded thresholds over the last 30 days?
-  ## enterococci > 130
-  mutate(ec_excd_130_30day_pct = ((rollapplyr(ec_excd_130, 1:n() - findInterval(date - days(30), date), 
-                                           sum, fill = NA, partial = T)) / grp_sample_ct) * 100) %>%
-  ## fecal coliform > 31
-  mutate(fc_excd_31_30day_pct = ((rollapplyr(fc_excd_31, 1:n() - findInterval(date - days(30), date), 
-                                           sum, fill = NA, partial = T)) / grp_sample_ct) * 100) %>%
-  ## fecal coliform > 400
-  mutate(fc_excd_400_30day_pct = ((rollapplyr(fc_excd_400, 1:n() - findInterval(date - days(30), date), 
-                                           sum, fill = NA, partial = T)) / grp_sample_ct) * 100) %>%
-  
-  # if >10% of individual samples in prior 30 days have exceeded thresholds, assign exceedence classification 
-  ## we know 30 days of data is present if a gm30 value exists
-  mutate(indv_excd = ifelse(is.na(gm30),"",
-                            case_when(
-                              (ec_excd_130_30day_pct > 10) ~ "ec_excd_130",
-                              (fc_excd_400_30day_pct > 10 & fc_excd_31_30day_pct != 0) ~ "fc_excd_400",
-                              (fc_excd_31_30day_pct > 10) ~ "fc_excd_31"))) %>%
-  
-  
-  # question: is it possible;  or necessary here to reatin % of samples in prev 30 days that exceeded thresholds?  and plot it vs time
-  
-  
-  # retain useful columns
-  select(location,year,data_type,date,gm30,val,gm30_excd,indv_excd) %>%
-  
-  # fill in "no exceedence" observations with character designation
-  mutate(gm30_excd = ifelse(is.na(gm30_excd),"no_gm_excd",gm30_excd)) %>%
-  mutate(indv_excd = ifelse(indv_excd == "","no_indv_excd",indv_excd)) %>%
-  mutate(indv_excd = ifelse(is.na(indv_excd),"no_indv_excd",indv_excd))
-
-# there must be a better way to do this with nested tibbles and/or functions?  
+  ## individual sample Exceedances 
+  mutate(indv_excd = case_when(
+    (indv_excd != "NA") ~ indv_excd,
+    (value < 130 & data_type == "Enterococci") ~ "no_indv_excd",
+    (value >= 130 & data_type == "Enterococci") ~ "ec_excd_130")) %>%
+      
+  ## 30 day rolling geometric mean exceedances   
+  mutate(gm30_excd = case_when(
+    (gm30_excd != "NA") ~ gm30_excd,
+    (gm30 < 35 & data_type == "Enterococci") ~ "no_gm_excd",
+    (gm30 >= 35 & data_type == "Enterococci") ~ "gm_ec_excd_35"))
 
 ```
 
 <br>
 
-Create figure of day or year vs exceedence observation. Highlight start/stop of dipnet sesason
-
-```{r fig.height=10}
-
-# min and max sample dates within  the 2019-2020 sample seasons
-minmaxdates <- dat %>%
-  ungroup() %>%
-  mutate(day = yday(date)) %>%
-  summarise(mindate = min(day),
-            maxdate = max(day))
-
-# tile plot
-(tileplot <- dat %>%
-    
- # prep data for plotting
-  select(location,data_type,date,year,indv_excd,gm30_excd) %>%
-  pivot_longer(cols = c("indv_excd","gm30_excd"),names_to = "excd_class", values_to = "excd_val") %>%
-  filter(!is.na(excd_val)) %>%
-  mutate(day = yday(date),
-         date = ymd(date)) %>%
-
-# tile plot  
-    ggplot(aes(as.factor(date),excd_val)) +
-    geom_raster(aes(fill = excd_val)) +
-    facet_grid(location ~ year, scales = "free_x", labeller = labeller(location = label_wrap_gen(5))) +
-    xlab("") +
-    ylab("") +
-    #scale_x_date(labels = date_format("%b-%d")) +
-    theme_bw() +
-    points_theme +
-     theme(strip.text.y = element_text(angle = 0),
-           axis.text.x = element_text(angle = 50, size = 10, margin = margin(t=20)),
-           axis.text.y = element_blank(),
-           legend.direction = "vertical",
-           legend.position = "bottom") +
-    scale_y_discrete(breaks=NULL) +
-    
-    # modify legend text
-    scale_fill_manual(name="Exceedence Type (CFU/100 mL)\n18 AAC 70 Alaska Water Quality Standards (Amended as of April 6, 2018)\nBacteria, for Marine Water Uses",
-                      breaks = c("ec_excd_130",
-                                 "gm_ec_excd_35",
-                                 "fc_excd_31",
-                                 "gm_fc_excd_14",
-                                 "fc_excd_400"),
-                      labels = c("Contact Recreation (10% of Enterococci Samples > 130 in Prior 30 Days)",
-                                 "Contact Recreation (30-Day Geometric Mean Enterococci > 35)",
-                                 "Raw Aquatic Life Consumption (10% of Fecal Coliform Samples > 31 in Prior 30 Days)",
-                                 "Raw Aquatic Life Consumption (30-Day Geometric Mean Fecal Coliform > 14)",
-                                 "Secondary Recreation (10% of Fecal Coliform Samples > 400 in Prior 30 Days)"),
-                      values=c("red","blue", "green", "purple","orange","white","white")) 
-)
-
-# save plot
-ggsave("output/exceedence_extents.png", width = 10, height = 11)
-
-# to do: figure out how to reorder factors to match order in legend
-
-
-```
-
-<br>
-
---future goal: use "heat map calendar" format: <https://vietle.info/post/calendarheatmap/>
-
-<br>
-
-Export data table used to generate above figure
+Export data table for annual report appendix
 
 ```{r}
-# prep table
+# prep table for export
 excd_tbl <- dat %>%
-  mutate(gm30_excd = ifelse(gm30_excd == "no_gm_excd","",gm30_excd)) %>%
-  mutate(indv_excd = ifelse(indv_excd == "no_indv_excd","",indv_excd)) %>%
-  transform(gm30 = format(round(as.numeric(gm30),1)) ) %>%
-  mutate(gm30 = ifelse(gm30 == "   NA","",gm30)) %>%
+  # select columns
+  select(location,data_type,date,value,gm30,indv_excd,gm30_excd) %>%
+  transform(gm30 = format(round(as.numeric(gm30),1))) %>%
   mutate(gm30_excd = case_when(
-    (gm30_excd == "gm_fc_excd_14") ~ "> 14",
+    (gm30_excd == "gm_fc_excd_200") ~ "> 200",
     (gm30_excd == "gm_ec_excd_35") ~ "> 35")) %>%
   mutate(indv_excd = case_when(
     (indv_excd == "fc_excd_31") ~ "> 31",
@@ -721,84 +740,340 @@ excd_tbl <- dat %>%
          Year = year,
          Bacteria = data_type,
          Date = date,
-         `30 Day Geometric Mean Value` = gm30,
-         `Individual Sample Value` = val,
-         `30 Day Geometric Mean Exceedence` = gm30_excd,
-         `10% of Individual Samples in Prior 30 Days Exceedence` = indv_excd) 
- 
+         `30 Day Rolling Geometric Mean Value` = gm30,
+         `Individual Sample Value` = value,
+         `30 Day Geometric Mean Exceedance` = gm30_excd,
+         `Individual Sample Value Exceedance` = indv_excd) 
 
 # save table
-write.csv(excd_tbl,"output/exceedence_table.csv", row.names = F)
+write.csv(excd_tbl,"output/exceedance_table.csv", row.names = F)
+
+## manually format conditional color and page sizes in excel
 
 ```
 
 <br>
 
-Plot exceedence of geometric mean thresholds
+#### Fecal Coliform
+
+1.  Secondary Water Recreation
+
+    1.  In-season exceedances
+
+        -   When do individual fecal concentration values \> 31 CFU/100 mL?
+        -   When do individual fecal concentration values \> 400 CFU/100 mL?
+
+```{r, fig.width = 8, fig.height = 12}
+# render plot
+bact <- "Fecal Coliform"
+dat %>%
+  filter(data_type == bact) %>%
+  ggplot(aes(as.Date(paste(2014,strftime(date,format="%m-%d"),sep="-")),
+             value,
+             color = indv_excd)) +
+    geom_point(size = 3) +
+  
+  # indv. sample std for harvesting raw aquatic life = 31 CFU/100 mL
+  geom_hline(yintercept = 31, lty = "dashed") +
+  
+  # indv. sample std for secondary water recreation = 400 CFU/100 mL
+  geom_hline(yintercept = 400, lty = "dashed") +
+  
+    facet_grid(location ~ year, labeller = labeller(location = label_wrap_gen(5))) +
+  xlab("") +
+  ylab("Sample Concentration\n(CFU/100 mL)") +
+  theme_bw() +
+  theme(strip.text.y = element_text(angle = 0),
+        legend.direction = "vertical",
+        legend.position = "bottom") +
+  
+  scale_color_discrete(name="Exceedance Type (CFU/100 mL)",
+                      breaks = c("fc_excd_31",
+                                 "fc_excd_400",
+                                 "no_indv_excd"),
+                      labels = c("Raw Aquatic Life Consumption Advisory (> 31)",
+                                 "Secondary Water Recreation Advisory (> 400)",
+                                 "No Advisory")) +
+  col_theme +
+  
+  # top title
+  ggtitle("Fecal Coliform") +
+  
+  # top and bottom subtitles
+  labs(subtitle = "Individual Samples",
+       caption = "18 AAC 70 Alaska Water Quality Standards (Amended as of April 6, 2018): Bacteria, for Marine Water Uses") + 
+  theme(plot.caption = element_text(hjust=0.5, size=rel(0.8)))
+
+# save
+ggsave("output/fc_indv.png", width = 16, height = 22, units = "cm")
+
+```
+
+<br>
+
+-   When do 30 day geometric mean fecal coliform values exceed 200 CFU/100 mL?
+
+```{r, fig.width = 8, fig.height = 12}
+# prep for legend
+## values of >200 rare for geometric mean.  add dummy row so that it still shows up in legend
+dat <- dat %>%
+  ungroup() %>%
+  add_row(gm30_excd = "gm_fc_excd_200", gm30 = 0)
+
+
+# render plot
+bact <- "Fecal Coliform"
+dat %>%
+  filter(data_type == bact) %>%
+  ggplot(aes(as.Date(paste(2014,strftime(date,format="%m-%d"),sep="-")),
+             gm30,
+             color = gm30_excd)) +
+    geom_point(size = 3) +
+  
+  # indv. sample std for harvesting raw aquatic life = 31 CFU/100 mL
+  geom_hline(yintercept = 200, lty = "dashed") +
+  
+  facet_grid(location ~ year, labeller = labeller(location = label_wrap_gen(5))) +
+  ylim(0,250) +
+  xlab("") +
+  ylab("30 Day Geometric Mean Value\n(CFU/100 mL)") +
+  theme_bw() +
+  theme(strip.text.y = element_text(angle = 0),
+        legend.direction = "vertical",
+        legend.position = "bottom") +
+  
+  scale_color_discrete(name="Exceedance Type (CFU/100 mL)",
+                      breaks = c("fc_excd_200",
+                                 "no_gm_excd"),
+                      labels = c("Secondary Water Recreation Advisory (> 200)",
+                                 "No Advisory"),
+                      # force legend to show all values even if no exceedances present
+                      limits = c("fc_excd_200", "no_gm_excd")) +
+  col_theme +
+  
+  # top title
+  ggtitle("Fecal Coliform") +
+  
+  # top and bottom subtitles
+  labs(subtitle = "30 Day Geometric Mean Sample Values",
+       caption = "18 AAC 70 Alaska Water Quality Standards (Amended as of April 6, 2018): Bacteria, for Marine Water Uses") + 
+  theme(plot.caption = element_text(hjust=0.5, size=rel(0.8)))
+
+# save
+ggsave("output/fc_geomean.png", width = 16, height = 22, units = "cm")
+
+```
+
+<br>
+
+2.) Post-season exceedances
+
+-   At which sites do 10% of all samples in a season exceed
+
+    -   a.) 31 CFU/100 mL (Secondary Water Recreation)
+
+    -   b.) 400 CFU/100 mL (Harvesting Raw Aquatic Life for Consumption)
 
 ```{r}
+library(extdplyr)
 
-# gm30 enterococci
-dat %>%
-  filter(data_type == "Enterococci") %>%
-  # note; use of year for date format is "fake" placeholder
-  ggplot(aes(x = as.Date(paste(2014,strftime(date,format="%m-%d"),sep="-")),
-                           y = gm30, 
-                           color = as.factor(year))) +
-  geom_jitter(size = 2) +
-  facet_grid(. ~ location, scales = "free_y", labeller = labeller(location = label_wrap_gen(5))) +
-  xlab("") +
-  ylab("30-Day Geometric Mean\nConcentration (CFU/100 mL)") +
-  ylim(0,150) +
-  scale_color_discrete(name = "Year") +
+# render table
+bact <- "Fecal Coliform"
+z <- dat %>%
+  filter(data_type == bact) %>%
+    
+  # calculate percentages by exceedance type
+  pct_routine(location,year,indv_excd,
+              ungroup = T) %>%
+  transform(year = as.factor(year)) %>%
+  
+  # assign pass/fail
+  filter(indv_excd != "no_indv_excd") %>%
+  separate(indv_excd, sep = "_",into = c("a","b","std")) %>%
+  mutate(pass_fail = ifelse(pct > .1, "fail","pass")) %>%
+  select(-a,-b) %>%
+      adorn_pct_formatting() %>%
+  rename("Location" = "location",
+         "Year" = "year",
+         "% of Sample Above Standard" = "pct",
+         "Standard (CFU/100 mL)" = "std",
+         "Pass/Fail" = "pass_fail") %>%
+  arrange(Location,Year) 
 
-  # single-sample threshold
-  geom_hline(aes(yintercept = 35, linetype =  "Raw Aquatic Life Consumption\n(35 CFU/100 mL)"), color = "blue", size = 2) +
-  scale_linetype_manual(name = "Enterococci Threshold", values = c(2, 2),
-                        guide = guide_legend(override.aes = list(color = c("blue")))) +
-  # overall theme
-  theme_bw() +
-  theme(axis.text.x = element_text(vjust = 1,hjust = 1, angle = 35),
-        strip.text.y = element_text(angle = 0)) +
-  ggtitle("Enterococci") +
-  points_theme
-
-
-# save plot
-ggsave("output/enterococci_gm30conc_2019_2020.png", width = 10, height = 4)
-
-
-# gm30 fecal coliform
-bac_tbl %>%
-  filter(data_type == "Fecal Coliform") %>%
-  # note; use of year for date format is "fake" placeholder
-  ggplot(aes(x = as.Date(paste(2014,strftime(date,format="%m-%d"),sep="-")),
-                           y = val, 
-                           color = as.factor(year))) +
-  geom_jitter(size = 2) +
-  facet_grid(. ~ location, scales = "free_y", labeller = labeller(location = label_wrap_gen(5))) +
-  xlab("") +
-  ylab("30-Day Geometric Mean\nConcentration (CFU/100 mL)") +
-  scale_color_discrete(name = "Year") +
-
-  # single-sample thresholds
-  geom_hline(aes(yintercept = 14, linetype =  "Raw Aquatic Life Consumption\n(14 CFU/100 mL)"), color = "black", size = 2) +
-  geom_hline(aes(yintercept = 200, linetype =  "Water recreation, secondary\n(200 CFU/100 mL)"), color = "red", size = 2) +
-  scale_linetype_manual(name = "Fecal Coliform Threshold", values = c(2, 2),
-                        guide = guide_legend(override.aes = list(color = c("black","red")))) +
-  # overall theme
-  theme_bw() +
-  theme(axis.text.x = element_text(vjust = 1,hjust = 1, angle = 35),
-        strip.text.y = element_text(angle = 0)) +
-  points_theme +
-  ggtitle("Fecal Coliform")
-
-# save plot
-ggsave("output/fecal_coliform_gm30conc_2019_2020.png", width = 10, height = 4)
+# save table
+write.csv(z, "output/fc_site_exd_pct.csv", row.names = F)
 
 ```
 
 <br>
+
+-   At which sites does the geometric mean of all samples from a season exceed 14 CFU/100 mL?
+
+```{r}
+# render table
+bact <- "Fecal Coliform"
+(z <- dat %>%
+  filter(data_type == bact) %>%
+    
+  # calculate seasonal geometric means
+  group_by(location,year) %>%
+  summarise(seasonal_gm30 = mean(gm30, na.rm =T),
+            n = n()) %>%
+  
+  # assign pass/fail
+  mutate(pass_fail = ifelse(seasonal_gm30 > 14,"fail","pass")) %>%
+  rename("Location" = "location",
+         "Year" = "year",
+         "Seasonal Average of 30 Day Geometric Mean Fecal Coliform" = "seasonal_gm30",
+         "Pass/Fail" = "pass_fail"))
+
+# save
+write.csv(z, "output/fc_season_geomean.csv", row.names = F)
+
+```
+
+<br>
+
+#### Enterococci
+
+1.) Contact recreation; in-season exceedances
+
+-   When did individual enterococci samples exceed 130 CFU/100 mL?
+
+```{r, fig.width = 8, fig.height = 12}
+# render plot
+bact <- "Enterococci"
+dat %>%
+  filter(data_type == bact) %>%
+  ggplot(aes(as.Date(paste(2014,strftime(date,format="%m-%d"),sep="-")),
+             value,
+             color = indv_excd)) +
+    geom_point(size = 3) +
+  
+  # indv. sample std for harvesting raw aquatic life = 130 CFU/100 mL
+  geom_hline(yintercept = 130, lty = "dashed") +
+  
+  facet_grid(location ~ year, labeller = labeller(location = label_wrap_gen(5))) +
+  ylim(0,150) +
+  xlab("") +
+  ylab("Sample Concentration Value\n(CFU/100 mL)") +
+  theme_bw() +
+  theme(strip.text.y = element_text(angle = 0),
+        legend.direction = "vertical",
+        legend.position = "bottom") +
+  
+  scale_color_discrete(name="Exceedance Type (CFU/100 mL)",
+                      breaks = c("ec_excd_130",
+                                 "no_indv_excd"),
+                      labels = c("Contact Recreation Advisory (> 130)",
+                                 "No Advisory"),
+                      # force legend to show all values even if no exceedances present
+                      limits = c("ec_excd_130", "no_indv_excd")) +
+  col_theme +
+  
+  # top title
+  ggtitle("Enterococci") +
+  
+  # top and bottom subtitles
+  labs(subtitle = "Individual Sample Values",
+       caption = "18 AAC 70 Alaska Water Quality Standards (Amended as of April 6, 2018): Bacteria, for Marine Water Uses") + 
+  theme(plot.caption = element_text(hjust=0.5, size=rel(0.8)))
+
+# save
+ggsave("output/ec_indv.png", width = 16, height = 22, units = "cm")
+```
+
+<br>
+
+-   When did the 30-day geometric mean sample values exceed 35 CFU/100 mL?
+
+```{r, fig.width = 8, fig.height = 12}
+# render plot
+bact <- "Enterococci"
+dat %>%
+  filter(data_type == bact) %>%
+  ggplot(aes(as.Date(paste(2014,strftime(date,format="%m-%d"),sep="-")),
+             gm30,
+             color = gm30_excd)) +
+    geom_point(size = 3) +
+  
+  # 30 day geomean standard for contact recreation = 35 CFU/100 mL
+  geom_hline(yintercept = 35, lty = "dashed") +
+  
+  facet_grid(location ~ year, labeller = labeller(location = label_wrap_gen(5))) +
+  ylim(0,150) +
+  xlab("") +
+  ylab("30 Day Geometric Mean Value\n(CFU/100 mL)") +
+  theme_bw() +
+  theme(strip.text.y = element_text(angle = 0),
+        legend.direction = "vertical",
+        legend.position = "bottom") +
+  
+  scale_color_discrete(name="Exceedance Type (CFU/100 mL)",
+                      breaks = c("gm_ec_excd_35",
+                                 "no_gm_excd"),
+                      labels = c("Contact Recreation Advisory (> 35)",
+                                 "No Advisory"),
+                      # force legend to show all possible values even if no exceedances present
+                      limits = c("gm_ec_excd_35", "no_gm_excd")) +
+  col_theme +
+  
+  # top title
+  ggtitle(bact) +
+  
+  # top and bottom subtitles
+  labs(subtitle = "30 Day Geometric Mean Sample Values",
+       caption = "18 AAC 70 Alaska Water Quality Standards (Amended as of April 6, 2018): Bacteria, for Marine Water Uses") + 
+  theme(plot.caption = element_text(hjust=0.5, size=rel(0.8)))
+
+# save
+ggsave("output/ec_geomean.png", width = 16, height = 22, units = "cm")
+
+```
+
+<br>
+
+2.) Contact recreation, post-season exceedance
+
+-   What percentage of enterococci samples from the whole season exceeded 130 CFU/100 mL?
+
+```{r}
+# render table
+bact <- "Enterococci"
+(z <- dat %>%
+  filter(data_type == bact) %>%
+    
+  # calculate percentages by exceedance type
+  pct_routine(location,year,indv_excd,
+              ungroup = T) %>%
+  transform(year = as.factor(year)) %>%
+  
+  # assign pass/fail
+  filter(indv_excd != "no_indv_excd") %>%
+  separate(indv_excd, sep = "_",into = c("a","b","std")) %>%
+  mutate(pass_fail = ifelse(pct > .1, "fail","pass")) %>%
+  select(-a,-b) %>%
+      adorn_pct_formatting() %>%
+  rename("Location" = "location",
+         "Year" = "year",
+         "% of Sample Above Standard" = "pct",
+         "Standard (CFU/100 mL)" = "std",
+         "Pass/Fail" = "pass_fail") %>%
+  arrange(Location,Year) )
+
+
+# save table
+write.csv(z, "output/ec_site_exd_pct.csv", row.names = F)
+
+```
+
+<br>
+
+--future goal: use "heat map calendar" format: <https://vietle.info/post/calendarheatmap/>
+
+<br>
+
+#### Overall Summaries
 
 What was the range of geometric mean values?
 
@@ -815,121 +1090,21 @@ What was the range of geometric mean values?
 # save
 write.csv(summ_tbl, "output/mean_min_max.csv", row.names = F)
 
+# arrange and save data in alternate order
+summ_tbl_v2 <-  summ_tbl%>%
+  arrange(year,location,data_type) %>%
+  select(year,location,data_type,gm30_mean,gm30_se,gm30_max,gm30_min)
+write.csv(summ_tbl_v2, "output/mean_min_max_v2.csv", row.names = F)
+
 # overall
 dat %>%
   group_by(data_type) %>%
   filter(!is.na(gm30)) %>%
   summarise(gm30_mean = mean(gm30),
             gm30_max = max(gm30),
-            gm30_min = min(gm30))
+            gm30_min = min(gm30)) %>%
+  filter(!is.na(data_type))
 
 ```
 
 <br>
-
-Create table; calculate % exceedance frequency by site, year, and bacteria type for individual samples
-
-```{r fig.height=8}
-
-# % of days exceeding criteria for individual sample values
-indv_pct <- dat %>%
-  group_by(location,year,data_type) %>%
-  count(indv_excd) %>%
-  mutate(pct = prop.table(n)) %>%
-  arrange(data_type,location,year,indv_excd) %>%
-  filter(indv_excd != "no_indv_excd") %>% 
-  rename(excd_type = indv_excd) %>%
-  select(-n)
-
-# pct of days exceeding criteria for gm30 values
-gm30_pct <- dat %>%
-  filter(!is.na(gm30)) %>%
-  group_by(location,year,data_type) %>%
-  count(gm30_excd) %>%
-  mutate(pct = prop.table(n)) %>%
-  arrange(data_type,location,year,gm30_excd) %>%
-  filter(gm30_excd != "no_gm_excd")  %>%
-  rename(excd_type = gm30_excd) %>%
-  select(-n)
-
-# % of days exceeding criteria
-tbl <- bind_rows(gm30_pct,indv_pct) %>%
-  arrange(location,data_type,year) %>%
-  transform(year = as.factor(year)) 
-
-# prep table for report
-tbl1 <- tbl %>%
-  adorn_pct_formatting() %>%
-  rename(Location = location,
-         Year = year,
-         Bacteria = data_type,
-         `Exceedence (CFU/mL)` = excd_type,
-         `% of Sample Days in Exceedence` = pct) %>%
-  mutate(`Exceedence (CFU/mL)` = str_replace_all(`Exceedence (CFU/mL)`,c("gm_fc_excd_14" = "30 Day Geometric Mean > 14",
-                                                   "fc_excd_31" = "10% of Samples from Prior 30 Days > 31",
-                                                   "gm_ec_excd_35" = "30 Day Geometric Mean > 35",
-                                                   "ec_excd_130" = "10% of Samples from Prior 30 Days > 130",
-                                                   "fc_excd_400" = "10% of Samples from Prior 30 Days > 400")))
-
-
-# print table
-datatable(tbl1,
-          filter = 'top', 
-          options = list(pageLength = 5, autoWidth = TRUE))
-
-
-# save table
-write.csv(tbl1,"output/tbl_pct_days_excd.csv", row.names = F)
-
-# note that % days calculations includes only days after 30-days of data is available; not first 4-5 sampling events not included.  we can not include the prior 30 days becuase we need 30 days of prior data to determine exceedences
-
-```
-
-<br>
-
-Plot % of sample days in exceedance by exceedance type for each site/year
-
-```{r fig.height=10}
-# plot
-tbl %>%
-  mutate(excd = paste(data_type,excd_type)) %>%
-  ggplot(aes(data_type,pct, fill = excd)) +
-  geom_col(position = position_dodge2(preserve = "single")) +
-  facet_grid(location ~ year, labeller = labeller(location = label_wrap_gen(5))) +
- 
-  xlab("") +
-  ylab("Percent (%) of Sample Days With Exceedance") +
-  scale_y_continuous(breaks=seq(0, 1, .5), labels = scales::percent) +  # Ticks from 0-10, every 
-  theme_bw() +
-  theme(axis.text.x = element_text(vjust = 1),
-        strip.text.y = element_text(angle = 0)) +
-  theme(legend.direction = "vertical",
-           legend.position = "bottom") +
-  points_theme +
-  
-    # modify legend text
-    scale_fill_manual(name ="Exceedence Type (CFU/100 mL)\n18 AAC 70 Alaska Water Quality Standards (Amended as of April 6, 2018)\nBacteria, for Marine Water Uses",
-                      breaks = c("Enterococci ec_excd_130",
-                                 "Enterococci gm_ec_excd_35",
-                                 "Fecal Coliform fc_excd_31",
-                                 "Fecal Coliform gm_fc_excd_14",
-                                 "Fecal Coliform fc_excd_400"),
-                      labels = c("Contact Recreation (10% of Enterococci Samples > 130 in Prior 30 Days)",
-                                 "Contact Recreation (30-Day Geometric Mean Enterococci > 35)",
-                                 "Raw Aquatic Life Consumption (10% of Fecal Coliform Samples > 31 in Prior 30 Days)",
-                                 "Raw Aquatic Life Consumption (30-Day Geometric Mean Fecal Coliform > 14)",
-                                 "Secondary Recreation (10% of Fecal Coliform Samples > 400 in Prior 30 Days)"),
-                      values=c("red","purple","blue","orange","green"))
-
-# save
-ggsave("output/pct_days_excd.png", width = 10, height = 11)
-```
-
-
-
-------------------------------------------------------------------------
-
-------------------------------------------------------------------------
-
-<br>
-

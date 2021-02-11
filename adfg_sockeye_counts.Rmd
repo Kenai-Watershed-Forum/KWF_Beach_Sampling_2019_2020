@@ -1,0 +1,105 @@
+---
+title: "adfg_sockeye_counts"
+output:
+  html_document: 
+    fig_width: 10
+    fig_height: 6
+    fig_caption: yes
+    code_folding: hide
+    toc: yes
+    toc_depth: 4
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+editor_options: 
+  chunk_output_type: inline
+---
+
+Document last updated `r Sys.time()` by Benjamin Meyer ([ben\@kenaiwatershed.org](mailto:ben@kenaiwatershed.org){.email})
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = F, message = F)
+
+# clear environment
+rm(list=ls())
+
+# load packages
+library(tidyverse)
+library(scales)
+library(readxl)
+library(hms)
+library(plotly)
+library(DT)
+
+select <- dplyr::select
+
+# set plotting themes
+
+## geom_col plots theme
+col_theme <- theme(axis.title = element_text(size = 14, face = "bold"),
+                   strip.text = element_text(size = 14, face = "bold"),
+                   legend.title = element_text(size = 14, face = "bold"),
+                   legend.text = element_text(size = 14),
+                   axis.text = element_text(size = 14))
+
+```
+
+<br>
+
+### Sockeye daily sonar count 2017 - 2020
+
+```{r}
+# imported excel file from https://www.adfg.alaska.gov/sf/FishCounts/index.cfm?ADFG=main.displayResults
+
+# read in excel file
+dat <- read_excel("data/sockeye_counts_2017_2020.xlsx")
+
+# create plot
+
+## format season start/stop dates
+start_date <- as.Date(paste(2014,strftime("2014-07-10",format="%m-%d"),sep="-"))
+end_date <- as.Date(paste(2014,strftime("2014-07-31",format="%m-%d"),sep="-"))
+annotation_date <- as.Date(paste(2014,strftime("2014-07-20",format="%m-%d"),sep="-"))
+
+## format rectangle
+rect <- data.frame(xmin=start_date, xmax=end_date, ymin=-Inf, ymax=Inf)
+
+## plot
+dat %>%
+  ggplot(aes(x = as.Date(paste(2014,strftime(count_date,format="%m-%d"),sep="-")),
+                           y = fish_count, 
+                           color = as.factor(year))) +
+  geom_line(size = 1.2) +
+  xlab("") +
+  scale_y_continuous(name="Sockeye Count", labels = comma) +
+  labs(color = "Year") +
+  
+  # dipnet season start
+  geom_vline(xintercept = start_date, lty = "dashed", size = 1.2) +
+  # dipnet season end
+  geom_vline(xintercept = end_date, lty = "dashed", size = 1.2) +
+  
+  # highlight season area
+  geom_rect(data=rect, aes(xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax),
+              fill="orange",
+              alpha=0.3,
+              inherit.aes = FALSE) +
+  theme_bw() +
+  col_theme +
+  
+  # annotate
+  annotate("text",x = annotation_date, y = 120000, 
+           label = "Personal Use\nDipnet Fishery", size = 5) +
+  ggtitle("Kenai River 2017 - 2020 Late Run Sockeye") +
+  theme(title = element_text(size = 16))
+  
+
+## save
+ggsave("output/sockeye_counts.png", width = 10, height = 6)
+
+
+```
+
+
+
+
