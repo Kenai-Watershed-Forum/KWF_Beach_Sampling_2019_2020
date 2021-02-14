@@ -223,7 +223,7 @@ How many bacteria sample values all together do we have; including replicates?
 ```{r}
 dat %>%
   filter(data_type %in% c("Enterococci","Fecal Coliform")) %>%
-  group_by(data_type) %>%
+  group_by(data_type,year) %>%
   summarise(n = n())
 ```
 
@@ -307,7 +307,8 @@ Replicate difference summary table
 ```{r}
 # summarise
 rep_diff_summary <- rep_diff %>%
-  group_by(data_type) %>%
+  mutate(year = year(date)) %>%
+  group_by(data_type,year) %>%
   summarise(n = n(),
             mean = mean(pct_diff),
             se = std.error(pct_diff))
@@ -763,11 +764,13 @@ write.csv(excd_tbl,"output/exceedance_table.csv", row.names = F)
         -   When do individual fecal concentration values \> 31 CFU/100 mL?
         -   When do individual fecal concentration values \> 400 CFU/100 mL?
 
-```{r, fig.width = 8, fig.height = 12}
+```{r, fig.width = 8, fig.height = 6}
 # render plot
 bact <- "Fecal Coliform"
+yr <- "2020"
 dat %>%
-  filter(data_type == bact) %>%
+  filter(data_type == bact, 
+         year == yr) %>%
   ggplot(aes(as.Date(paste(2014,strftime(date,format="%m-%d"),sep="-")),
              value,
              color = indv_excd)) +
@@ -779,7 +782,7 @@ dat %>%
   # indv. sample std for secondary water recreation = 400 CFU/100 mL
   geom_hline(yintercept = 400, lty = "dashed") +
   
-    facet_grid(location ~ year, labeller = labeller(location = label_wrap_gen(5))) +
+    facet_grid(. ~ location, labeller = labeller(location = label_wrap_gen(5))) +
   xlab("") +
   ylab("Sample Concentration\n(CFU/100 mL)") +
   theme_bw() +
@@ -805,7 +808,7 @@ dat %>%
   theme(plot.caption = element_text(hjust=0.5, size=rel(0.8)))
 
 # save
-ggsave("output/fc_indv.png", width = 16, height = 22, units = "cm")
+ggsave("output/fc_indv.png", width = 18, height = 16, units = "cm")
 
 ```
 
@@ -813,7 +816,7 @@ ggsave("output/fc_indv.png", width = 16, height = 22, units = "cm")
 
 -   When do 30 day geometric mean fecal coliform values exceed 200 CFU/100 mL?
 
-```{r, fig.width = 8, fig.height = 12}
+```{r, fig.width = 8, fig.height = 6}
 # prep for legend
 ## values of >200 rare for geometric mean.  add dummy row so that it still shows up in legend
 dat <- dat %>%
@@ -823,8 +826,10 @@ dat <- dat %>%
 
 # render plot
 bact <- "Fecal Coliform"
+yr <- "2020"
 dat %>%
-  filter(data_type == bact) %>%
+  filter(data_type == bact,
+         year == yr) %>%
   ggplot(aes(as.Date(paste(2014,strftime(date,format="%m-%d"),sep="-")),
              gm30,
              color = gm30_excd)) +
@@ -833,7 +838,7 @@ dat %>%
   # indv. sample std for harvesting raw aquatic life = 31 CFU/100 mL
   geom_hline(yintercept = 200, lty = "dashed") +
   
-  facet_grid(location ~ year, labeller = labeller(location = label_wrap_gen(5))) +
+  facet_grid(. ~ location, labeller = labeller(location = label_wrap_gen(5))) +
   ylim(0,250) +
   xlab("") +
   ylab("30 Day Geometric Mean Value\n(CFU/100 mL)") +
@@ -860,7 +865,7 @@ dat %>%
   theme(plot.caption = element_text(hjust=0.5, size=rel(0.8)))
 
 # save
-ggsave("output/fc_geomean.png", width = 16, height = 22, units = "cm")
+ggsave("output/fc_geomean.png", width = 18, height = 16, units = "cm")
 
 ```
 
@@ -868,7 +873,7 @@ ggsave("output/fc_geomean.png", width = 16, height = 22, units = "cm")
 
 2.) Post-season exceedances
 
--   At which sites do 10% of all samples in a season exceed
+-   At which sites do 10% of all fecal coliform samples in a season exceed
 
     -   a.) 31 CFU/100 mL (Secondary Water Recreation)
 
@@ -879,13 +884,15 @@ library(extdplyr)
 
 # render table
 bact <- "Fecal Coliform"
+yr <- "2020"
 z <- dat %>%
-  filter(data_type == bact) %>%
+  filter(data_type == bact,
+         year == yr) %>%
     
   # calculate percentages by exceedance type
-  pct_routine(location,year,indv_excd,
+  pct_routine(location,indv_excd,
               ungroup = T) %>%
-  transform(year = as.factor(year)) %>%
+  #transform(year = as.factor(year)) %>%
   
   # assign pass/fail
   filter(indv_excd != "no_indv_excd") %>%
@@ -894,11 +901,10 @@ z <- dat %>%
   select(-a,-b) %>%
       adorn_pct_formatting() %>%
   rename("Location" = "location",
-         "Year" = "year",
+         #"Year" = "year",
          "% of Sample Above Standard" = "pct",
          "Standard (CFU/100 mL)" = "std",
-         "Pass/Fail" = "pass_fail") %>%
-  arrange(Location,Year) 
+         "Pass/Fail" = "pass_fail") 
 
 # save table
 write.csv(z, "output/fc_site_exd_pct.csv", row.names = F)
@@ -912,20 +918,23 @@ write.csv(z, "output/fc_site_exd_pct.csv", row.names = F)
 ```{r}
 # render table
 bact <- "Fecal Coliform"
+yr <- "2020"
 (z <- dat %>%
-  filter(data_type == bact) %>%
+  filter(data_type == bact,
+         year == yr) %>%
     
   # calculate seasonal geometric means
-  group_by(location,year) %>%
-  summarise(seasonal_gm30 = mean(gm30, na.rm =T),
+  group_by(location) %>%
+  summarise(seasonal_gm30 = geometric.mean(value, na.rm =T),
             n = n()) %>%
   
   # assign pass/fail
   mutate(pass_fail = ifelse(seasonal_gm30 > 14,"fail","pass")) %>%
   rename("Location" = "location",
-         "Year" = "year",
-         "Seasonal Average of 30 Day Geometric Mean Fecal Coliform" = "seasonal_gm30",
-         "Pass/Fail" = "pass_fail"))
+         #"Year" = "year",
+         "Overall Seasonal Geometric Mean Fecal Coliform Value" = "seasonal_gm30",
+         "Pass/Fail" = "pass_fail")) %>%
+  arrange(Location)
 
 # save
 write.csv(z, "output/fc_season_geomean.csv", row.names = F)
@@ -940,11 +949,13 @@ write.csv(z, "output/fc_season_geomean.csv", row.names = F)
 
 -   When did individual enterococci samples exceed 130 CFU/100 mL?
 
-```{r, fig.width = 8, fig.height = 12}
+```{r, fig.width = 8, fig.height = 6}
 # render plot
 bact <- "Enterococci"
+yr <- "2020"
 dat %>%
-  filter(data_type == bact) %>%
+  filter(data_type == bact,
+         year == yr) %>%
   ggplot(aes(as.Date(paste(2014,strftime(date,format="%m-%d"),sep="-")),
              value,
              color = indv_excd)) +
@@ -953,8 +964,8 @@ dat %>%
   # indv. sample std for harvesting raw aquatic life = 130 CFU/100 mL
   geom_hline(yintercept = 130, lty = "dashed") +
   
-  facet_grid(location ~ year, labeller = labeller(location = label_wrap_gen(5))) +
-  ylim(0,150) +
+  facet_grid(. ~ location, labeller = labeller(location = label_wrap_gen(5))) +
+  ylim(0,200) +
   xlab("") +
   ylab("Sample Concentration Value\n(CFU/100 mL)") +
   theme_bw() +
@@ -980,18 +991,20 @@ dat %>%
   theme(plot.caption = element_text(hjust=0.5, size=rel(0.8)))
 
 # save
-ggsave("output/ec_indv.png", width = 16, height = 22, units = "cm")
+ggsave("output/ec_indv.png", width = 18, height = 16, units = "cm")
 ```
 
 <br>
 
 -   When did the 30-day geometric mean sample values exceed 35 CFU/100 mL?
 
-```{r, fig.width = 8, fig.height = 12}
+```{r, fig.width = 8, fig.height = 6}
 # render plot
 bact <- "Enterococci"
+yr <- "2020"
 dat %>%
-  filter(data_type == bact) %>%
+  filter(data_type == bact,
+         year == yr) %>%
   ggplot(aes(as.Date(paste(2014,strftime(date,format="%m-%d"),sep="-")),
              gm30,
              color = gm30_excd)) +
@@ -1000,7 +1013,7 @@ dat %>%
   # 30 day geomean standard for contact recreation = 35 CFU/100 mL
   geom_hline(yintercept = 35, lty = "dashed") +
   
-  facet_grid(location ~ year, labeller = labeller(location = label_wrap_gen(5))) +
+  facet_grid(. ~ location, labeller = labeller(location = label_wrap_gen(5))) +
   ylim(0,150) +
   xlab("") +
   ylab("30 Day Geometric Mean Value\n(CFU/100 mL)") +
@@ -1027,7 +1040,7 @@ dat %>%
   theme(plot.caption = element_text(hjust=0.5, size=rel(0.8)))
 
 # save
-ggsave("output/ec_geomean.png", width = 16, height = 22, units = "cm")
+ggsave("output/ec_geomean.png", width = 18, height = 16, units = "cm")
 
 ```
 
@@ -1040,13 +1053,14 @@ ggsave("output/ec_geomean.png", width = 16, height = 22, units = "cm")
 ```{r}
 # render table
 bact <- "Enterococci"
+yr <- "2020"
 (z <- dat %>%
-  filter(data_type == bact) %>%
+  filter(data_type == bact,
+         year == yr) %>%
     
   # calculate percentages by exceedance type
-  pct_routine(location,year,indv_excd,
+  pct_routine(location,indv_excd,
               ungroup = T) %>%
-  transform(year = as.factor(year)) %>%
   
   # assign pass/fail
   filter(indv_excd != "no_indv_excd") %>%
@@ -1055,12 +1069,10 @@ bact <- "Enterococci"
   select(-a,-b) %>%
       adorn_pct_formatting() %>%
   rename("Location" = "location",
-         "Year" = "year",
+         #"Year" = "year",
          "% of Sample Above Standard" = "pct",
          "Standard (CFU/100 mL)" = "std",
-         "Pass/Fail" = "pass_fail") %>%
-  arrange(Location,Year) )
-
+         "Pass/Fail" = "pass_fail") )
 
 # save table
 write.csv(z, "output/ec_site_exd_pct.csv", row.names = F)
@@ -1105,6 +1117,156 @@ dat %>%
             gm30_min = min(gm30)) %>%
   filter(!is.na(data_type))
 
+# v 3.0 of summary table
+# both gm30 and indv vals; only 2020
+yr <- "2020"
+(summ_tbl <- dat %>%
+  filter(year == yr) %>%
+  group_by(location,data_type) %>%
+  filter(!is.na(gm30)) %>%
+  summarise(n = n(),
+            indv_mean = mean(value),
+            indv_min = min(value),
+            indv_max = max(value),
+            indv_se = std.error(value),
+            gm30_mean = mean(gm30),
+            gm30_min = min(gm30),
+            gm30_max = max(gm30),
+            gm30_se = std.error(value)) %>%
+  arrange(data_type,location) %>%
+  transform(n = as.factor(n)) %>%
+    # two decimal numeric columns
+  mutate(across(where(is.numeric), round, 2)) %>%
+  
+    # condense columns
+  mutate(indv_mean_se = paste(indv_mean,"±",indv_se),
+         gm30_mean_se = paste(gm30_mean,"±",gm30_se)) %>%
+    select(data_type,location,n,
+         indv_mean_se,
+         indv_min,
+         indv_max,
+         gm30_mean_se,
+         gm30_min,
+         gm30_max))
+  
+
+# rename cols
+colnames(summ_tbl) <- c("Bacteria",
+                        "Location",
+                        "n",
+                        "Individual Sample Mean ± Std. Error",
+                        "Individual Sample Min",
+                        "Individual Sample Max",
+                        "30 Day Geometric Mean Value Mean ± Std. Error",
+                        "30 Day Geometric Mean Value Min",
+                        "30 Day Geometric Mean Value Max")
+
+# save
+write.csv(summ_tbl, "output/mean_min_max_v3.csv", row.names = F)
 ```
 
 <br>
+
+Overall, how does 2019 compare to 2020?
+```{r}
+# 
+dat %>%
+  filter(!is.na(location)) %>%
+  ggplot(aes(x = location, y = value, fill = as.factor(year))) +
+  geom_boxplot() +
+  geom_point(position = position_jitterdodge()) +
+  facet_grid(data_type ~ location, 
+             scales = "free_x",
+             labeller = labeller(location = label_wrap_gen(5))) +
+  theme_bw() +
+  col_theme +
+  theme(axis.text.x = element_blank(),
+        strip.text.y = element_text(angle = 0)) +
+  xlab("") +
+  ylab("Sample Concentration\n(CFU/100 mL)") +
+  labs(fill = "Year")
+
+# save
+ggsave("output/overall_2019_2020.png",height = 6, width = 10)
+```
+<br>
+
+WHEN did in-season exceedances happen?
+```{r}
+# reshape dataframe so both indvidual exceedances and gm30 exceedances are in same column
+z <- dat %>%
+  select(location,data_type,date,year,indv_excd,gm30_excd) %>%
+  pivot_longer(cols = c("indv_excd","gm30_excd"), values_to = "excd")
+
+# prep to rename facets
+excd_names <- c(
+  "ec_excd_130",
+  "gm_ec_excd_35",
+  "fc_excd_31",
+  "fc_excd_400",
+  "gm_fc_excd_200"
+)
+
+#
+yr <- "2020"
+z %>%
+  filter(year == yr,
+         excd != "no_indv_excd",
+         excd != "no_gm_excd",
+         !is.na(excd)) %>%
+  transform(date = as.Date(date)) %>%
+  ggplot(aes(date,excd, color = excd)) +
+  geom_point(size = 4) +
+  facet_grid(location ~ ., 
+             labeller = labeller(location = label_wrap_gen(5)),
+             scales = "free_y") +
+  theme_bw() +
+  col_theme +
+  xlab("") +
+  ylab("") +
+
+  # theme tweaks
+theme(legend.direction = "vertical",
+      legend.position = "bottom",
+      axis.text.y = element_blank(),
+      strip.text.y = element_text(angle = 0)) +
+  scale_x_date(breaks = pretty_breaks(8)) +
+  
+  # legend content
+  scale_color_discrete(name="Exceedance Type (CFU/100 mL)",
+                      breaks = c("ec_excd_130",
+                                 "gm_ec_excd_35",
+                                 "fc_excd_31",
+                                 "fc_excd_400",
+                                 "gm_fc_excd_200"),
+                      labels = c("Contact Recreation Advisory (Enterococci > 130)",
+                                 "Contact Recreation Advisory (30 Day Geometric Mean Enterococci > 35)",
+                                 "Secondary Water Recreation Advisory (Fecal Coliform > 31)",
+                                 "Secondary Water Recreation Advisory (Fecal Coliform > 400)",
+                                 "Secondary Water Recreation Advisory (30 Day Geometric Mean Fecal Coliform > 200)"),
+                      
+                      # force legend to show all values even if no exceedances present
+                      limits = c("ec_excd_130",
+                                 "gm_ec_excd_35",
+                                 "fc_excd_31",
+                                 "fc_excd_400",
+                                 "gm_fc_excd_200")) +
+  # overall theme
+  col_theme +
+  
+  # top title
+  ggtitle("2020 In-season Exceedances") +
+  
+  # top and bottom subtitles
+  labs(subtitle = "Fecal Coliform and Enterococci",
+       caption = "18 AAC 70 Alaska Water Quality Standards (Amended as of April 6, 2018): Bacteria, for Marine Water Uses") + 
+  theme(plot.caption = element_text(hjust=0.5, size=rel(0.8)))
+
+# save
+ggsave("output/overall_inseason.png", width = 22, height = 22, units = "cm")
+
+
+# reorder factors, rename factors, put 18 aac text @ bottom like others
+# add manual for fc gm >200 std
+```
+

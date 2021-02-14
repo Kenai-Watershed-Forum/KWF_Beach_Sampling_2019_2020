@@ -1,11 +1,6 @@
-"Location","Year","Seasonal Average of 30 Day Geometric Mean Fecal Coliform","n","Pass/Fail"
-"Kenai River Gull Rookery 1",2019,21.5836298691323,14,"fail"
-"Kenai River Gull Rookery 1",2020,61.0907340035498,13,"fail"
-"Kenai River Gull Rookery 2",2019,29.1853384658354,14,"fail"
-"Kenai River Gull Rookery 2",2020,18.899875235115,13,"fail"
-"North Kenai Beach 4",2019,36.5064431320904,14,"fail"
-"North Kenai Beach 4",2020,12.8440808110795,13,"pass"
-"South Kenai Beach 3",2019,69.2317748701441,14,"fail"
-"South Kenai Beach 3",2020,47.0112725046832,14,"fail"
-"Warren Ames Bridge",2019,18.1617827325352,13,"fail"
-"Warren Ames Bridge",2020,11.2160317174366,13,"pass"
+Location,Overall Seasonal Geometric Mean Fecal Coliform Value (CFU/100 mL),Standard (CFU/100 mL),n,Pass/Fail
+Kenai River Gull Rookery 1,30.75,14,13,fail
+Kenai River Gull Rookery 2,13.89,14,13,pass
+North Kenai Beach 4,13.29,14,13,pass
+South Kenai Beach 3,30.70,14,14,fail
+Warren Ames Bridge,10.51,14,13,pass

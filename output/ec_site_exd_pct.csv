@@ -1,4 +1,2 @@
-"Location","Year","Standard (CFU/100 mL)","% of Sample Above Standard","Pass/Fail"
-"North Kenai Beach 4","2019","130","21.4%","fail"
-"South Kenai Beach 3","2019","130","35.7%","fail"
-"South Kenai Beach 3","2020","130","15.4%","fail"
+"Location","Standard (CFU/100 mL)","% of Sample Above Standard","Pass/Fail"
+"South Kenai Beach 3","130","15.4%","fail"

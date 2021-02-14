@@ -1,0 +1,11 @@
+"Bacteria","Location","n","Individual Sample Mean ± Std. Error","Individual Sample Min","Individual Sample Max","30 Day Geometric Mean Value Mean ± Std. Error","30 Day Geometric Mean Value Min","30 Day Geometric Mean Value Max"
+"Enterococci","Kenai River Gull Rookery 1","8","15.19 ± 4.79",0.5,37,"7.84 ± 4.79",4.02,10.37
+"Enterococci","Kenai River Gull Rookery 2","8","11.62 ± 4.52",0.5,33,"4.52 ± 4.52",2.83,8.24
+"Enterococci","North Kenai Beach 4","8","10.81 ± 4.6",0.5,38,"6.05 ± 4.6",2.61,10.02
+"Enterococci","South Kenai Beach 3","8","74.12 ± 25.96",3,178,"29.09 ± 25.96",14.54,39.75
+"Enterococci","Warren Ames Bridge","8","2.25 ± 0.88",0.5,8,"1.48 ± 0.88",1,1.89
+"Fecal Coliform","Kenai River Gull Rookery 1","8","109.88 ± 41.62",3,310,"61.09 ± 41.62",33.52,94.87
+"Fecal Coliform","Kenai River Gull Rookery 2","8","24.16 ± 5.5",3.3,50,"18.9 ± 5.5",12.62,24.43
+"Fecal Coliform","North Kenai Beach 4","8","23.02 ± 6.21",2,43,"12.84 ± 6.21",7.03,20.33
+"Fecal Coliform","South Kenai Beach 3","8","147.16 ± 71.09",5.7,600,"47.01 ± 71.09",13.05,79.44
+"Fecal Coliform","Warren Ames Bridge","8","16.46 ± 5.99",1,46,"11.22 ± 5.99",6.01,15.92
