@@ -1,7 +1,7 @@
 ---
 title: "virtual_beach"
 output:
-  html_document: 
+  html_document:
     fig_width: 10
     fig_height: 6
     fig_caption: yes
@@ -11,7 +11,10 @@ output:
     toc_float:
       collapsed: no
       smooth_scroll: no
-editor_options: 
+  pdf_document:
+    toc: yes
+    toc_depth: '4'
+editor_options:
   chunk_output_type: inline
 ---
 
@@ -41,6 +44,7 @@ library(zoo)
 library(psych)
 library(janitor)
 library(scales)
+library(htmltools)
 
 select <- dplyr::select
 
@@ -67,21 +71,23 @@ points_theme <- theme(axis.title = element_text(size = 14, face = "bold"),
 
 <br>
 
-This draft document prepares and examines data from the EPA BEACON beach database that will be used in implementing the EPA Virtual Beach model for North and South Kenai Beach
+This draft document prepares and examines data from the EPA BEACON beach database that will be used in implementing the EPA Virtual Beach model for North and South Kenai Beach.
+
+The script aims to produce site-specific spreadsheets of environmental data as described inthe Virtual Beach User manual (p 15,"Global Datasheet: Data Requirements and Considerations.")
 
 <br>
 
-Notes:
+General notes:
 
--   Data was downloaded as a csv file from EPA BEACON repository using the "reports" function in December 2020 (<https://watersgeo.epa.gov/BEACON2/reports.html>). Contains data 2010 - 2020.
+-   Environmental data was downloaded as a csv file from EPA BEACON repository using the "reports" function in December 2020 (<https://watersgeo.epa.gov/BEACON2/reports.html>). The file contains data all archived data 2010 - 2020.
 
--   Script in development using guidance from virtual beach user manual at <https://www.epa.gov/sites/production/files/2016-03/documents/vb3_manual_3.0.6.pdf>
+-   This script is in development, using guidance from virtual beach user manual at <https://www.epa.gov/sites/production/files/2016-03/documents/vb3_manual_3.0.6.pdf>
 
 -   World Meteorological Organization (WMO) 4501 weather codes at <https://www.jodc.go.jp/data_format/weather-code.html>
 
--   Watch out for mixed use of metric and standard units in original import from EPA database...
+-   Watch out for mixed use of metric and standard units in original import from EPA database.
 
--   Need to get associated coordinates for each site
+-   Need to get associated coordinates for each sampling site.
 
 <br>
 
@@ -121,14 +127,15 @@ new_vars <- c("year",
 dat <- read.csv("data/epa_historical_data.csv") %>%
   select(all_of(vars))
 
+
 # rename columns
 colnames(dat) <- new_vars
 
 # format col type 
 dat <- dat %>%
   mutate(datetime = dmy_hms(paste(date,time))) %>%
-  transform(date = dmy(date),
-            time = hms::as_hms(time),
+  transform(date = date(datetime),
+            time = hms::as_hms(datetime),
             sample_value = as.numeric(sample_value),
             sample_type = as.factor(sample_type)) %>%
   # remove missing values
@@ -154,12 +161,26 @@ dat <- dat %>%
   mutate(sample_unit = ifelse(sample_unit == "knots", "mps",sample_unit)) %>%
   
   # inches to meters
+  
+  
   # knots to meters per second
   mutate(sample_value = ifelse(sample_unit == "in",(sample_value*0.0254), sample_value)) %>%
   mutate(sample_unit = ifelse(sample_unit == "in", "m",sample_unit)) 
 
 
-# modify sample type names
+
+# some records of bacteria concentrations have inconsistent unit designations.  Each observation of enterococcus should be in "MPN/100 mL" and each observation of fecal coliform should be in "cfu/100 mL".
+
+# apply bacteria unit corrections
+
+dat <- dat %>%
+  # fecal coliform units
+  mutate(sample_unit = ifelse(sample_type == "Fecal Coliform","MPN/100ml",sample_unit)) %>%
+  # enterococcus units
+  mutate(sample_unit = ifelse(sample_type == "Enterococcus","cfu/100ml",sample_unit))
+
+
+# modify and simplify sample type names
 dat <- dat %>%
   mutate(sample_type = str_replace_all(
     sample_type,
@@ -175,7 +196,9 @@ dat <- dat %>%
       )))
 
 # some sample type names are stubborn and will not readily modify... may have hidden spaces or other formatting
+
 # use another method
+
 # filter and rename the stubborn sample types
 weather <- dat %>%
   filter(sample_type == "Weather condition (WMO code 4501) (choice list)") %>%
@@ -189,13 +212,22 @@ wind <- dat %>%
 dat <- dat %>%
   filter(sample_type %ni% c("Weather condition (WMO code 4501) (choice list)",
                             "Wind direction (direction from, expressed 0-360 deg)")) %>%
-  bind_rows(weather,wind)
+  bind_rows(weather,wind) %>%
+  
+  # remove missing dates
+  filter(!is.na(date))
+
+
+# clean up
+rm(weather,wind)
 
 ```
 
 <br>
 
-#### Data summary
+### Data summary
+
+What is the temporal extent for each type of data we have at each location?
 
 ```{r}
 # summarise
@@ -222,7 +254,8 @@ datatable(tbl,
 
 Notes:
 
--   There are some observations from 2010 at a site called "Kenai North Beach." This site name nomenclature is different than all the other years. Need to find out which North Kenai Beach site these data are from.
+-   There are some observations from 2010 at a site called "Kenai North Beach." This site name nomenclature is different than all the other years. Need to find out which "North Kenai Beach" site these data are from.
+
 -   WMO Weather codes are not a continuous variable, so mean and std. error do not apply and are spurious values in the above table.
 
 <br>
@@ -231,7 +264,7 @@ Notes:
 
 #### Replicate samples
 
-Apply criteria for replicate sample values.
+Examine presence of replicate samples in data set, and apply ADEC agency criteria for replicate sample values.
 
 -   How many replicate samples do we have?
 
@@ -251,21 +284,23 @@ datatable(rep_ct)
   
 ```
 
-For each sample type, "rep_set" indicates the quantity of simultaneously collected samples in a given instance, and "count" indicates the quantity of instances with simultaneous sample results. For example, as of Jan 15, 2021, we have 81 instances where 2 replicates of "enterococcus_mpn_100mL" exist.
+Note on above table summarizing replicate samples:
+
+-   For each sample type, "rep_set" indicates the quantity of simultaneously collected samples in a given instance, and "count" indicates the quantity of instances with simultaneous sample results. For example, as of Jan 15, 2021, we have 80 instances where 2 replicates of "enterococcus_mpn_100mL" exist.
+
+-   To employ this data in the Virtual Beach model, we need a single value for each sample type and sampling event.
+
+    -   For environmental variables (temperature, wind, etc), we will create an average value for each.
+
+    -   For bacteria concentrations however, variation between replicates can be substantial.
+
+-   ADEC protocol to address sample variability, as of Feb 2021 (personal communication, G. Augat, ADEC Juneau Office) is to only employ the "sample" value and not the "replicate" value.
+
+-   In this data set we have additional instances where not just two replicate samples for bacteria concentrations exist, but also instances of 3, 4, 5, and 6 simultaneous replicates.
 
 <br>
 
-To employ this data in the Virtual Beach model, we need a single value for each sample type and sampling event.
-
-For environmental variables (temperature, wind, etc), we will create an average value.
-
-For bacteria concentrations however, variation between duplicates can be substantial. ADEC has existing protocol to address this. As per ADEC CALM protocol, "where two replicate values exist, only the higher of the two values are used in further analyses."
-
-In this data set we have additional instances where not just two replicate samples for bacteria concentrations exist, but also instances of 3, 4, 5, and 6 replicates. In these instances also, we will apply the protocol of including only the highest value.
-
-<br>
-
-Apply criteria described above
+Apply criteria described above. Filter out samples that include the designation of either "Quality Control Sample-Blind Duplicate" or "Quality Control Field Replicate Msr/Obs"
 
 ```{r}
 # create list of environmental variables
@@ -283,13 +318,21 @@ enviro_vars <- c("wind_velocity_kph",
 # create means for environmental variables
 enviro_dat <- dat %>%
   filter(sample_type %in% enviro_vars) %>%
-  group_by(across(c(-sample_value,-sample_activity,-sample_comment))) %>%
+  group_by(across(c(-sample_value,-sample_activity,-sample_comment,-sample_unit))) %>%
   summarise(mean_sample_value = mean(sample_value)) %>%
   ungroup()
 
-# retain only the highest value in instances where replicate bacteria concentrations values exist
+# exclude samples designated as "Quality Control Sample-Blind Duplicate"
+
+# and, if replicates still remain after that exclusion, retain only the highest value in instances where replicate bacteria concentrations values still exist
+
+# rationale: some historical replicate samples may not have been recorded as such
 bac_dat <- dat %>%
-  filter(sample_type %in% c("fecal_coliform_cfu_100mL","enterococcus_mpn_100mL")) %>%
+  filter(sample_type %in% c("fecal_coliform_cfu_100mL","enterococcus_mpn_100mL"),
+         sample_activity != "Quality Control Sample-Blind Duplicate",
+         sample_activity != "Quality Control Field Replicate Msr/Obs") %>%
+  
+  # group
   group_by(across(c(-sample_value,-sample_activity,-sample_comment))) %>%
   
   # where pairs of two replicate samples exist, retain only the higher of the two values.  
@@ -303,18 +346,24 @@ bac_dat <- dat %>%
 # rejoin bacteria and enviro data
 dat <- bind_rows(enviro_dat,bac_dat)
 
+# replace "NA" with blanks
+z <- dat %>%
+  replace(is.na(.), " ")
+  
+
 ```
 
 <br>
 
-Prep for export
+------------------------------------------------------------------------
 
-Work in progress here Jan 15, 2021
-```{r}
-# make environmental variables "wide" format so they each have their own column
-dat 
+### Data export
 
-z <- dat %>%
+Create site-specific spreadsheets fo all data 2010 - 2020 following format described in Virtual Beach user guide (pg 15).
+
+```{r }
+# make all variables "wide" format so they each have their own column
+dat <- dat %>%
 
   # remove unneeded columns for clean pivot
   ungroup() %>%
@@ -323,19 +372,8 @@ z <- dat %>%
   
   # make wider
   pivot_wider(names_from = sample_type,
-              values_from = mean_sample_value) 
+              values_from = mean_sample_value) %>%
 
-# dup values just left for fc 2011 data... why?
-
-z1 <- dat %>%
-  filter(sample_)
-  
-  #%>%
-  unnest(cols = c(water_temp_C, air_temp_C, fecal_coliform_cfu_100mL, enterococcus_mpn_100mL, 
-    pH, turbidity_NTU, conductivity_mS_cm, wind_velocity_kph, 
-    tide_range_m, weather_code_wmo4501, wave_height_m,wind_direction_deg)) %>%
-  
-  distinct() %>%
 
   # arrange rows chronologically by site
   arrange(site,datetime) 
@@ -349,18 +387,77 @@ datatable(dat,
 
 <br>
 
-Export csv files to local project folder
+------------------------------------------------------------------------
 
+#### Site name consolidation
+
+Explanation:
+
+-   Original site names in the EPA database may be redundant for using the EPA virtual beach program For example, there are multiple "North Kenai Beach" and "South Kenai Beach" sites. The small difference is in coordinates for each of these sites are likely not relevant in this modeling application
+
+<br>
+
+Consolidate site names
 ```{r}
+# apply site name consolidations
+## read in manually created consolditaions
+consolidate_sites <- read_excel("output/excel_tables/vb_site_names.xlsx")
 
-# export csv to local output folder
-dir.create("output/virtual_beach_data")
+## apply new site names
 
-# all overall data
-write_csv(dat,"output/vb_data_format.csv",row.names = F)
- 
-# individual csv for each site
-dat %>%
+dat1 <- dat %>%
+  left_join(consolidate_sites) %>%
+  select(-site) %>%
+  rename("site" = "consolidated_sitename") %>%
+  relocate(site, .before = date) %>%
+  # arrange chronologically by site
+  arrange(site,datetime) %>%
+  # create row number sets for each site
   group_by(site) %>%
-  do(write_csv(., paste0("output/virtual_beach_data/",unique(.$site), ".csv")))
+  select(-date,-time) %>%
+  relocate(datetime, .before = site)
+
+```
+
+<br>
+
+#### Export to spreadsheets
+
+Create separate csv spreadsheet exports for fecal coliform and enterococci and their associated environmental data
+
+<br>
+
+Enterococci export
+```{r}
+## remove old directory if present
+unlink("output/virtual_beach_data/enterococci", recursive = T)
+dir.create("output/virtual_beach_data/enterococci")
+
+ 
+# write an individual csv for each site
+dat1 %>%
+  select(-fecal_coliform_cfu_100mL) %>%
+  filter(!is.na(enterococcus_mpn_100mL)) %>%
+  relocate(enterococcus_mpn_100mL, .after = datetime) %>%
+  group_by(site) %>%
+  do(write_csv(., paste0("output/virtual_beach_data/enterococci/",unique(.$site), ".csv")))
+
+```
+<br>
+
+Fecal coliform export
+```{r}
+## remove old directory if present
+unlink("output/virtual_beach_data/fecal_coliform", recursive = T)
+dir.create("output/virtual_beach_data/fecal_coliform")
+
+ 
+# write an individual csv for each site
+dat1 %>%
+  select(-enterococcus_mpn_100mL) %>%
+  filter(!is.na(fecal_coliform_cfu_100mL)) %>%
+  relocate(fecal_coliform_cfu_100mL, .after = datetime) %>%
+  group_by(site) %>%
+  do(write_csv(., paste0("output/virtual_beach_data/fecal_coliform/",unique(.$site), ".csv")))
+
 ```
