@@ -345,10 +345,6 @@ bac_dat <- dat %>%
 
 # rejoin bacteria and enviro data
 dat <- bind_rows(enviro_dat,bac_dat)
-
-# replace "NA" with blanks
-z <- dat %>%
-  replace(is.na(.), " ")
   
 
 ```
