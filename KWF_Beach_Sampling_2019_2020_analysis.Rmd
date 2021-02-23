@@ -1243,7 +1243,7 @@ theme(legend.direction = "vertical",
                                  "gm_fc_excd_200"),
                       labels = c("Contact Recreation Advisory (Enterococci > 130)",
                                  "Contact Recreation Advisory (30 Day Geometric Mean Enterococci > 35)",
-                                 "Secondary Water Recreation Advisory (Fecal Coliform > 31)",
+                                 "Harvesting Seafood for Raw Consumption (Fecal Coliform > 31)",
                                  "Secondary Water Recreation Advisory (Fecal Coliform > 400)",
                                  "Secondary Water Recreation Advisory (30 Day Geometric Mean Fecal Coliform > 200)"),
                       
